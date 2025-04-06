@@ -30,13 +30,18 @@ typedef std::map<
 
 class CallGraphPass : public IterativeModulePass {
     private:
+        ModuleFunctionMap ModuleFuncMap;
+        StaticFunctionPointerMap StaticFPMap;
+        DynamicFunctionPointerMap DynamicFPMap;
+        FunctionPtrArgMap FuncPtrArgMap;
+
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerInit(Module *M);
         void CollectDynamicFunctionPointerInit(Module *M);
         void CollectGlobalFunctionPointerInit(Module *M);
         void CollectFunctionPointerArguments(Module *M);
 
-        void RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName, unsigned Index, StringRef FuncName);
+        void RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName, unsigned Index, StringRef FuncName, unsigned);
         void RecordDynamicFuncPtrAssignment(StringRef ModuleName, StringRef InFunction,
             StringRef TargetFunc, StringRef AssignedTo, unsigned LineNumber);
         void RecordFuncPtrArgument(StringRef ModuleName, StringRef CallerFunc,

@@ -3,6 +3,8 @@ set (AnalyzerSourceCodes
 	Analyzer.h
 	CallGraphPass.cc
 	CallGraphPass.h
+	Utils.cc
+	Utils.h
 )
 
 #file(COPY configs/ DESTINATION configs)

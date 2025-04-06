@@ -13,111 +13,6 @@
 
 using namespace llvm;
 
-ModuleFunctionMap ModuleFuncMap;
-StaticFunctionPointerMap StaticFPMap;
-DynamicFunctionPointerMap DynamicFPMap;
-FunctionPtrArgMap FuncPtrArgMap;
-
-static void PrintFuncPtrArgumentMap() {
-    std::cout << "==== Function Pointer Argument Map ====" << std::endl;
-
-    for (const auto &modEntry : FuncPtrArgMap) {
-        const std::string &modName = modEntry.first;
-        const auto &funcMap = modEntry.second;
-
-        std::cout << "Module: " << modName << std::endl;
-
-        for (const auto &funcEntry : funcMap) {
-            const std::string &caller = funcEntry.first;
-            const std::vector<std::string> &entries = funcEntry.second;
-
-            std::cout << "  Caller Function: " << caller << std::endl;
-            for (const std::string &entry : entries) {
-                std::cout << "    " << entry << std::endl;
-            }
-        }
-    }
-
-    std::cout << "==== End of Map ====" << std::endl;
-}
-
-static void PrintDynamicFunctionPointerMap() {
-    std::cout << "==== Dynamic Function Pointer Map ====" << std::endl;
-
-    for (const auto &modEntry : DynamicFPMap) {
-        const std::string &modName = modEntry.first;
-        const auto &funcMap = modEntry.second;
-
-        std::cout << "Module: " << modName << std::endl;
-
-        for (const auto &funcEntry : funcMap) {
-            const std::string &funcName = funcEntry.first;
-            const std::vector<std::string> &entries = funcEntry.second;
-
-            std::cout << "  Function: " << funcName << std::endl;
-
-            for (const std::string &entry : entries) {
-                std::cout << "    " << entry << std::endl;
-            }
-        }
-
-        std::cout << std::endl;
-    }
-
-    std::cout << "==== End of Map ====" << std::endl;
-}
-
-
-static void PrintModuleFunctionMap(ModuleFunctionMap &ModuleFunctionMap) {
-    std::cout << "=== ModuleFunctionMap Debug Dump ===" << std::endl;
-
-    // Iterate over each module
-    for (const auto &entry : ModuleFunctionMap) {
-        const std::string &moduleName = entry.first;
-        const std::vector<std::string> &functions = entry.second;
-
-        std::cout << "Module: " << moduleName << std::endl;
-
-        // Iterate over function prototype strings
-        for (const std::string &proto : functions) {
-            std::cout << "  [" << proto << "]" << std::endl;
-        }
-
-        std::cout << std::endl;
-    }
-
-    std::cout << "=== End of Dump ===" << std::endl;
-}
-
-void PrintStaticFunctionPointerMap() {
-    std::cout << "==== Static Function Pointer Map ====" << std::endl;
-
-    // Iterate over struct types
-    for (const auto &typeEntry : StaticFPMap) {
-        const std::string &structType = typeEntry.first;
-        const auto &instanceMap = typeEntry.second;
-
-        std::cout << "Struct Type: " << structType << std::endl;
-
-        // Iterate over each global variable (instance of the struct)
-        for (const auto &varEntry : instanceMap) {
-            const std::string &varName = varEntry.first;
-            const std::vector<std::string> &entries = varEntry.second;
-
-            std::cout << "  Variable: " << varName << std::endl;
-
-            // Show index:function mappings
-            for (const std::string &entry : entries) {
-                std::cout << "    " << entry << std::endl;
-            }
-        }
-
-        std::cout << std::endl;
-    }
-
-    std::cout << "==== End of Map ====" << std::endl;
-}
-
 void IterativeModulePass::run(ModuleList &modules) {
     std::cout << "Running pass: " << ID << std::endl;
 
@@ -134,7 +29,6 @@ void IterativeModulePass::run(ModuleList &modules) {
         }
 	}
 
-	PrintFuncPtrArgumentMap();
     std::cout << "Pass completed: " << ID << std::endl;
 }
 
@@ -184,6 +78,13 @@ void CallGraphPass::CollectFunctionProtoTypes(Module *M) {
 			F.getFunctionType()->getParamType(i)->print(RSO);
 		}
 
+        unsigned Line = 0;
+        if (DISubprogram *SP = F.getSubprogram()) {
+            Line = SP->getLine();
+        }
+
+        RSO << ":" << Line;
+
 		// Add to prototype list
 		if (!RSO.str().empty()) {
 			FuncPrototypes.push_back(RSO.str());
@@ -209,6 +110,14 @@ void CallGraphPass::CollectStaticFunctionPointerInit(Module *M) {
         if (auto *CS = dyn_cast<ConstantStruct>(Init)) {
             for (unsigned i = 0; i < CS->getNumOperands(); ++i) {
                 Value *op = CS->getOperand(i);
+                unsigned Line = 0;
+                if (GV.hasMetadata()) {
+                    if (auto *dbg = GV.getMetadata("dbg")) {
+                        if (auto *DGV = dyn_cast<DIGlobalVariableExpression>(dbg)) {
+                            Line = DGV->getVariable()->getLine();
+                        }
+                    }
+                }
 
                 // Case 1: direct function pointer
                 if (Function *F = dyn_cast<Function>(op)) {
@@ -221,7 +130,7 @@ void CallGraphPass::CollectStaticFunctionPointerInit(Module *M) {
                     }
 
                     // Register to StaticFPMap
-                    RecordStaticFuncPtrInit(StructTypeName, GV.getName(), i, F->getName());
+                    RecordStaticFuncPtrInit(StructTypeName, GV.getName(), i, F->getName(), Line);
                 }
 
                 // Case 2: bitcasted function pointer
@@ -235,7 +144,7 @@ void CallGraphPass::CollectStaticFunctionPointerInit(Module *M) {
                                     StructTypeName = ST->getName().str();
                             }
 
-                            RecordStaticFuncPtrInit(StructTypeName, GV.getName(), i, F->getName());
+                            RecordStaticFuncPtrInit(StructTypeName, GV.getName(), i, F->getName(), Line);
                         }
                     }
                 }
@@ -375,8 +284,8 @@ void CallGraphPass::CollectFunctionPointerArguments(Module *M) {
 }
 
 void CallGraphPass::RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName,
-	unsigned Index, StringRef FuncName) {
-	std::string Entry = std::to_string(Index) + ":" + FuncName.str();
+	unsigned Index, StringRef FuncName, unsigned Line) {
+	std::string Entry = std::to_string(Index) + ":" + FuncName.str() + ":" + std::to_string(Line);
 	StaticFPMap[StructTypeName.str()][VarName.str()].push_back(Entry);
 }
 
