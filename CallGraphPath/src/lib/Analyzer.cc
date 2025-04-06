@@ -39,7 +39,6 @@ int main(int argc, char **argv)
         Module *Module = M.release();
         StringRef ModuleName = StringRef(strdup(InputFilenames[i].data()));
         GlobalCtx.Modules.push_back(std::make_pair(Module, ModuleName));
-		GlobalCtx.ModuleMaps[Module] = InputFilenames[i];
     }
 
     CallGraphPass CGPass(&GlobalCtx, "CallGraphPass");

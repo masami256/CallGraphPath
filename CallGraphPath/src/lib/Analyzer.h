@@ -18,5 +18,4 @@ struct GlobalContext {
 
     // Modules.
 	ModuleList Modules;
-	ModuleNameMap ModuleMaps;
 };
