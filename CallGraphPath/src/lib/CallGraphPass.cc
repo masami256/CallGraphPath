@@ -5,6 +5,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/User.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <iostream>
@@ -14,6 +15,34 @@ using namespace llvm;
 
 ModuleFunctionMap ModuleFuncMap;
 StaticFunctionPointerMap StaticFPMap;
+DynamicFunctionPointerMap DynamicFPMap;
+
+static void PrintDynamicFunctionPointerMap() {
+    std::cout << "==== Dynamic Function Pointer Map ====" << std::endl;
+
+    for (const auto &modEntry : DynamicFPMap) {
+        const std::string &modName = modEntry.first;
+        const auto &funcMap = modEntry.second;
+
+        std::cout << "Module: " << modName << std::endl;
+
+        for (const auto &funcEntry : funcMap) {
+            const std::string &funcName = funcEntry.first;
+            const std::vector<std::string> &entries = funcEntry.second;
+
+            std::cout << "  Function: " << funcName << std::endl;
+
+            for (const std::string &entry : entries) {
+                std::cout << "    " << entry << std::endl;
+            }
+        }
+
+        std::cout << std::endl;
+    }
+
+    std::cout << "==== End of Map ====" << std::endl;
+}
+
 
 static void PrintModuleFunctionMap(ModuleFunctionMap &ModuleFunctionMap) {
     std::cout << "=== ModuleFunctionMap Debug Dump ===" << std::endl;
@@ -81,7 +110,7 @@ void IterativeModulePass::run(ModuleList &modules) {
         }
 	}
 
-	PrintStaticFunctionPointerMap();
+	PrintDynamicFunctionPointerMap();
     std::cout << "Pass completed: " << ID << std::endl;
 }
 
@@ -93,6 +122,8 @@ bool CallGraphPass::CollectInformation(Module *M) {
 
 	CollectFunctionProtoTypes(M);
 	CollectStaticFunctionPointerInit(M);
+	CollectDynamicFunctionPointerInit(M);
+    CollectGlobalFunctionPointerInit(M);
     return true;
 }
 
@@ -139,7 +170,7 @@ void CallGraphPass::CollectFunctionProtoTypes(Module *M) {
 
 void CallGraphPass::CollectStaticFunctionPointerInit(Module *M) {
     for (GlobalVariable &GV : M->globals()) {
-        errs() << "Processing global variable: " << GV.getName() << "\n";
+        // errs() << "Processing global variable: " << GV.getName() << "\n";
 
         if (!GV.hasInitializer()) {
             // errs() << "  (no initializer)\n";
@@ -189,9 +220,94 @@ void CallGraphPass::CollectStaticFunctionPointerInit(Module *M) {
     }
 }
 
+void CallGraphPass::CollectDynamicFunctionPointerInit(Module *M) {
+    std::string ModName = M->getName().str();
+
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
+
+        std::string FuncName = F.getName().str();
+
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                if (auto *store = dyn_cast<StoreInst>(&I)) {
+                    Value *val = store->getValueOperand();
+                    Value *ptr = store->getPointerOperand();
+
+                    Function *TargetFunc = nullptr;
+
+                    // Case 1: direct function pointer
+                    if ((TargetFunc = dyn_cast<Function>(val))) {
+                        // nothing to do
+                    }
+                    // Case 2: bitcasted function pointer
+                    else if (auto *CE = dyn_cast<ConstantExpr>(val)) {
+                        if (CE->isCast()) {
+                            if (Function *F = dyn_cast<Function>(CE->getOperand(0))) {
+                                TargetFunc = F;
+                            }
+                        }
+                    }
+
+                    if (TargetFunc) {
+                        std::string PtrStr;
+                        raw_string_ostream RSO(PtrStr);
+                        ptr->print(RSO);
+
+                        // Attempt to get debug line number if available
+                        unsigned Line = 0;
+                        if (DILocation *Loc = I.getDebugLoc()) {
+                            Line = Loc->getLine();
+                        }
+
+                        RecordDynamicFuncPtrAssignment(
+                            ModName, FuncName, TargetFunc->getName(), RSO.str(), Line);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void CallGraphPass::CollectGlobalFunctionPointerInit(Module *M) {
+    std::string ModName = M->getName().str();
+
+    for (GlobalVariable &GV : M->globals()) {
+        if (!GV.hasInitializer()) continue;
+
+        Constant *Init = GV.getInitializer();
+        Function *TargetFunc = nullptr;
+
+        // Case 1: direct function pointer
+        if ((TargetFunc = dyn_cast<Function>(Init))) {
+            // OK
+        }
+
+        // Case 2: bitcasted function
+        else if (auto *CE = dyn_cast<ConstantExpr>(Init)) {
+            if (CE->isCast()) {
+                if (Function *F = dyn_cast<Function>(CE->getOperand(0))) {
+                    TargetFunc = F;
+                }
+            }
+        }
+
+        if (TargetFunc) {
+            // LHS is global variable name (GV.getName())
+            RecordDynamicFuncPtrAssignment(
+                ModName, "__global__", TargetFunc->getName(), GV.getName(), 0);
+        }
+    }
+}
 
 void CallGraphPass::RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName,
 	unsigned Index, StringRef FuncName) {
 	std::string Entry = std::to_string(Index) + ":" + FuncName.str();
 	StaticFPMap[StructTypeName.str()][VarName.str()].push_back(Entry);
+}
+
+void CallGraphPass::RecordDynamicFuncPtrAssignment(StringRef ModuleName, StringRef InFunction,
+	StringRef TargetFunc, StringRef AssignedTo, unsigned LineNumber) {
+    std::string Entry = TargetFunc.str() + ":" + AssignedTo.str() + ":" + std::to_string(LineNumber);
+    DynamicFPMap[ModuleName.str()][InFunction.str()].push_back(Entry);
 }
