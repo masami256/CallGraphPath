@@ -15,7 +15,7 @@
 
 using namespace llvm;
 
-void IterativeModulePass::run(ModuleList &modules) {
+void CallGraphPass::run(ModuleList &modules) {
     std::cout << "Running pass: " << ID << std::endl;
 
     ModuleList::iterator i, e;

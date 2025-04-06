@@ -40,7 +40,7 @@ using IndirectCallCandidates = std::map<
         std::map<unsigned, std::set<std::string>>>>;  // Line -> Set of function names
 
 
-class CallGraphPass : public IterativeModulePass {
+class CallGraphPass {
     private:
         ModuleFunctionMap ModuleFuncMap;
         StaticFunctionPointerMap StaticFPMap;
@@ -71,12 +71,14 @@ class CallGraphPass : public IterativeModulePass {
 
         Function* resolveCalledFunction(Value *V);
         void CollectStaticIndirectCallCandidates(Module *M);
-
+    protected:
+        GlobalContext *Ctx;
+        const char * ID;
     public:
-        CallGraphPass(GlobalContext *Ctx_)
-            : IterativeModulePass(Ctx_, "CallGraph") { }
+        CallGraphPass(GlobalContext *Ctx_, const char *ID_)
+        : Ctx(Ctx_), ID(ID_) { }
         
-        virtual bool CollectInformation(Module *M);
-        //virtual bool doFinalization(llvm::Module *);
-        virtual bool IdentifyTargets(llvm::Module *M);
+        void run(ModuleList &modules);
+        bool CollectInformation(Module *M);
+        bool IdentifyTargets(llvm::Module *M);
 };

@@ -20,26 +20,3 @@ struct GlobalContext {
 	ModuleList Modules;
 	ModuleNameMap ModuleMaps;
 };
-
-class IterativeModulePass {
-    protected:
-        GlobalContext *Ctx;
-        const char * ID;
-    public:
-        IterativeModulePass(GlobalContext *Ctx_, const char *ID_)
-            : Ctx(Ctx_), ID(ID_) { }
-    
-        // Run on each module before iterative pass.
-        virtual bool CollectInformation(Module *M)
-            { return true; }
-    
-        // Run on each module after iterative pass.
-        //virtual bool doFinalization(llvm::Module *M)
-        //	{ return true; }
-    
-        // Iterative pass.
-        virtual bool IdentifyTargets(llvm::Module *M)
-            { return false; }
-    
-        virtual void run(ModuleList &modules);
-};

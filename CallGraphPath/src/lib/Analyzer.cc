@@ -42,7 +42,7 @@ int main(int argc, char **argv)
 		GlobalCtx.ModuleMaps[Module] = InputFilenames[i];
     }
 
-    CallGraphPass CGPass(&GlobalCtx);
+    CallGraphPass CGPass(&GlobalCtx, "CallGraphPass");
 	CGPass.run(GlobalCtx.Modules);
 
 	return 0;
