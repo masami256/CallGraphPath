@@ -35,7 +35,7 @@ void PrintDynamicFunctionPointerMap(DynamicFunctionPointerMap &DynamicFPMap) {
 
         for (const auto &funcEntry : funcMap) {
             const std::string &funcName = funcEntry.first;
-            const std::vector<std::string> &entries = funcEntry.second;
+            const std::set<std::string> &entries = funcEntry.second;
 
             std::cout << "  Function: " << funcName << std::endl;
 
@@ -49,7 +49,6 @@ void PrintDynamicFunctionPointerMap(DynamicFunctionPointerMap &DynamicFPMap) {
 
     std::cout << "==== End of Map ====" << std::endl;
 }
-
 
 void PrintModuleFunctionMap(ModuleFunctionMap &ModuleFunctionMap) {
     std::cout << "=== ModuleFunctionMap Debug Dump ===" << std::endl;
@@ -149,4 +148,38 @@ void PrintCallGraph(DirectCallMap &DirectCallMap, IndirectCallMap &IndirectCallM
     }
 
     std::cout << "==== End of Call Graph ====" << std::endl;
+}
+
+void PrintResolvedIndirectCalls(IndirectCallCandidates &IndirectCallCandidates) {
+    std::cout << "==== Resolved Indirect Calls ====" << std::endl;
+    for (const auto &modEntry : IndirectCallCandidates) {
+        const std::string &mod = modEntry.first;
+        const auto &funcMap = modEntry.second;
+
+        for (const auto &fentry : funcMap) {
+            const std::string &caller = fentry.first;
+            const auto &lineMap = fentry.second;
+
+            for (const auto &lineEntry : lineMap) {
+                unsigned line = lineEntry.first;
+                const auto &targets = lineEntry.second;
+
+                std::cout << mod << ": " << caller << " [line " << line << "] -> ";
+
+                if (targets.empty()) {
+                    std::cout << "(unknown)";
+                } else {
+                    bool first = true;
+                    for (const auto &target : targets) {
+                        if (!first) std::cout << " ";
+                        std::cout << target;
+                        first = false;
+                    }
+                }
+
+                std::cout << std::endl;
+            }
+        }
+    }
+    std::cout << "==== End of Resolved Indirect Calls ====" << std::endl;
 }

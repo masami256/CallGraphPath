@@ -16,7 +16,7 @@ typedef std::map<
     std::string, // Module Name（Module->getName()）
     std::map<
         std::string,               // Function name which the function pointer is assigned to
-        std::vector<std::string>  // String of "Callee:AssignedTo:Line"
+        std::set<std::string>  // String of "Callee:AssignedTo:Line"
     >
 > DynamicFunctionPointerMap;
 
@@ -34,6 +34,8 @@ typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> D
 // For indirect calls: module → caller → list of "called_value(IR text):line"
 typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> IndirectCallMap;
 
+// module → caller → line → set of candidate callees
+typedef std::map<std::string, std::map<std::string, std::map<unsigned, std::set<std::string>>>> IndirectCallCandidates;
 
 class CallGraphPass : public IterativeModulePass {
     private:
@@ -43,12 +45,15 @@ class CallGraphPass : public IterativeModulePass {
         FunctionPtrArgMap FuncPtrArgMap;
         DirectCallMap DirectCallMap;
         IndirectCallMap IndirectCallMap;
+        IndirectCallCandidates IndirectCallCandidates;
         
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerInit(Module *M);
         void CollectDynamicFunctionPointerInit(Module *M);
         void CollectGlobalFunctionPointerInit(Module *M);
         void CollectFunctionPointerArguments(Module *M);
+        void CollectCallInstructions(Module *M);
+        void CollectIndirectCallCandidates(Module *M);
 
         void RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName, unsigned Index, StringRef FuncName, unsigned);
         void RecordDynamicFuncPtrAssignment(StringRef ModuleName, StringRef InFunction,
@@ -61,7 +66,7 @@ class CallGraphPass : public IterativeModulePass {
         void RecordIndirectCall(StringRef ModuleName, StringRef CallerFunc,
             StringRef CalledValueStr, unsigned Line);
 
-        void CollectCallInstructions(Module *M);
+        Function* resolveCalledFunction(Value *V);
 
     public:
         CallGraphPass(GlobalContext *Ctx_)
