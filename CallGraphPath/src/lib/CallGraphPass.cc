@@ -16,6 +16,30 @@ using namespace llvm;
 ModuleFunctionMap ModuleFuncMap;
 StaticFunctionPointerMap StaticFPMap;
 DynamicFunctionPointerMap DynamicFPMap;
+FunctionPtrArgMap FuncPtrArgMap;
+
+static void PrintFuncPtrArgumentMap() {
+    std::cout << "==== Function Pointer Argument Map ====" << std::endl;
+
+    for (const auto &modEntry : FuncPtrArgMap) {
+        const std::string &modName = modEntry.first;
+        const auto &funcMap = modEntry.second;
+
+        std::cout << "Module: " << modName << std::endl;
+
+        for (const auto &funcEntry : funcMap) {
+            const std::string &caller = funcEntry.first;
+            const std::vector<std::string> &entries = funcEntry.second;
+
+            std::cout << "  Caller Function: " << caller << std::endl;
+            for (const std::string &entry : entries) {
+                std::cout << "    " << entry << std::endl;
+            }
+        }
+    }
+
+    std::cout << "==== End of Map ====" << std::endl;
+}
 
 static void PrintDynamicFunctionPointerMap() {
     std::cout << "==== Dynamic Function Pointer Map ====" << std::endl;
@@ -110,7 +134,7 @@ void IterativeModulePass::run(ModuleList &modules) {
         }
 	}
 
-	PrintDynamicFunctionPointerMap();
+	PrintFuncPtrArgumentMap();
     std::cout << "Pass completed: " << ID << std::endl;
 }
 
@@ -124,6 +148,8 @@ bool CallGraphPass::CollectInformation(Module *M) {
 	CollectStaticFunctionPointerInit(M);
 	CollectDynamicFunctionPointerInit(M);
     CollectGlobalFunctionPointerInit(M);
+    CollectFunctionPointerArguments(M);
+
     return true;
 }
 
@@ -300,6 +326,54 @@ void CallGraphPass::CollectGlobalFunctionPointerInit(Module *M) {
     }
 }
 
+void CallGraphPass::CollectFunctionPointerArguments(Module *M) {
+    std::string ModName = M->getName().str();
+
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
+
+        std::string CallerName = F.getName().str();
+
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                if (auto *call = dyn_cast<CallBase>(&I)) {
+                    Function *Callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+                    if (!Callee) continue;
+
+                    for (unsigned i = 0; i < call->arg_size(); ++i) {
+                        Value *Arg = call->getArgOperand(i);
+                        Function *PassedFunc = nullptr;
+
+                        if ((PassedFunc = dyn_cast<Function>(Arg))) {
+                            // ok
+                        } else if (auto *CE = dyn_cast<ConstantExpr>(Arg)) {
+                            if (CE->isCast()) {
+                                PassedFunc = dyn_cast<Function>(CE->getOperand(0));
+                            }
+                        }
+
+                        if (PassedFunc) {
+                            unsigned Line = 0;
+                            if (DILocation *Loc = I.getDebugLoc()) {
+                                Line = Loc->getLine();
+                            }
+
+                            RecordFuncPtrArgument(
+                                ModName,
+                                CallerName,
+                                PassedFunc->getName(),
+                                Callee->getName(),
+                                i,
+                                Line
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 void CallGraphPass::RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName,
 	unsigned Index, StringRef FuncName) {
 	std::string Entry = std::to_string(Index) + ":" + FuncName.str();
@@ -310,4 +384,17 @@ void CallGraphPass::RecordDynamicFuncPtrAssignment(StringRef ModuleName, StringR
 	StringRef TargetFunc, StringRef AssignedTo, unsigned LineNumber) {
     std::string Entry = TargetFunc.str() + ":" + AssignedTo.str() + ":" + std::to_string(LineNumber);
     DynamicFPMap[ModuleName.str()][InFunction.str()].push_back(Entry);
+}
+
+void CallGraphPass::RecordFuncPtrArgument(
+    StringRef ModuleName,
+    StringRef CallerFunc,
+    StringRef PassedFunc,
+    StringRef CalleeFunc,
+    unsigned ArgIndex,
+    unsigned LineNumber)
+{
+    std::string Entry = PassedFunc.str() + ":arg" + std::to_string(ArgIndex) +
+                        ":" + CalleeFunc.str() + ":" + std::to_string(LineNumber);
+    FuncPtrArgMap[ModuleName.str()][CallerFunc.str()].push_back(Entry);
 }

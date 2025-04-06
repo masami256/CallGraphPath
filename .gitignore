@@ -1,0 +1,5 @@
+build/
+*.ll
+*.bc
+*.log
+bc.list

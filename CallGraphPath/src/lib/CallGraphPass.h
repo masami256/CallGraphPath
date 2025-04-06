@@ -20,16 +20,29 @@ typedef std::map<
     >
 > DynamicFunctionPointerMap;
 
+typedef std::map<
+    std::string, // Module Name（Module->getName()）
+    std::map<
+        std::string,             // Callee function name 
+        std::vector<std::string> // Pointer to function:Line number:Callee function:Line number
+    >
+> FunctionPtrArgMap;
+
 class CallGraphPass : public IterativeModulePass {
     private:
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerInit(Module *M);
         void CollectDynamicFunctionPointerInit(Module *M);
         void CollectGlobalFunctionPointerInit(Module *M);
+        void CollectFunctionPointerArguments(Module *M);
 
         void RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName, unsigned Index, StringRef FuncName);
         void RecordDynamicFuncPtrAssignment(StringRef ModuleName, StringRef InFunction,
             StringRef TargetFunc, StringRef AssignedTo, unsigned LineNumber);
+        void RecordFuncPtrArgument(StringRef ModuleName, StringRef CallerFunc,
+            StringRef PassedFunc, StringRef CalleeFunc,
+            unsigned ArgIndex, unsigned LineNumber);
+
     public:
         CallGraphPass(GlobalContext *Ctx_)
             : IterativeModulePass(Ctx_, "CallGraph") { }
