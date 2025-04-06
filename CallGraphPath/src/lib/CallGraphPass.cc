@@ -44,7 +44,7 @@ bool CallGraphPass::CollectInformation(Module *M) {
     std::string ModName = M->getName().str();
     errs() << "Collecting information from module: " << ModName << "\n";
 
-    // 各種情報収集
+    // Collect various information
     CollectFunctionProtoTypes(M);
     CollectStaticFunctionPointerInit(M);
     CollectStaticIndirectCallCandidates(M);
@@ -54,7 +54,7 @@ bool CallGraphPass::CollectInformation(Module *M) {
     CollectFunctionPointerArguments(M);
     CollectCallInstructions(M);
 
-    // デバッグ・確認用出力（任意）
+    // For debugging
     PrintStaticFunctionPointerMap(StaticFPMap);
     DumpEntireIndirectCallCandidates(IndirectCallCandidates);
     // PrintResolvedIndirectCalls(IndirectCallCandidates);
@@ -371,22 +371,13 @@ void CallGraphPass::CollectIndirectCallCandidates(Module *M) {
                         }
                     }
 
-                    // Store or print result
-                    // errs() << ModName << ": " << FuncName << " [line " << Line << "] -> ";
-                    // if (CandidateFuncs.empty()) {
-                    //     errs() << "(unknown)\n";
-                    // } else {
-                    //     errs() << "[";
-                    //     bool first = true;
-                    //     for (const auto &name : CandidateFuncs) {
-                    //         if (!first) errs() << ", ";
-                    //         errs() << name;
-                    //         first = false;
-                    //     }
-                    //     errs() << "]\n";
-                    // }
-
-                    IndirectCallCandidates[ModName][FuncName][Line] = CandidateFuncs;
+                    auto &TargetSet = IndirectCallCandidates[ModName][FuncName][Line];
+                    for (const auto &func : CandidateFuncs) {
+                        auto result = TargetSet.insert(func);
+                        // errs() << "[debug] Inserted: " << func
+                        //     << " -> success? " << result.second
+                        //     << ", set size: " << TargetSet.size() << "\n";
+                    }
                 }
             }
         }
@@ -542,7 +533,7 @@ LoadInst* resolveCalledOperand(Value *called) {
 
 void CallGraphPass::CollectStaticIndirectCallCandidates(Module *M) {
     std::string ModName = M->getName().str();
-    errs() << "[debug] address of this->IndirectCallCandidates = " << &IndirectCallCandidates << "\n";
+    // errs() << "[debug] address of this->IndirectCallCandidates = " << &IndirectCallCandidates << "\n";
 
     for (Function &F : *M) {
         if (F.isDeclaration()) continue;
@@ -590,10 +581,10 @@ void CallGraphPass::CollectStaticIndirectCallCandidates(Module *M) {
                     }
 
                     // === Debug info ===
-                    errs() << "[debug] In function: " << FuncName << ", line: " << Line << "\n";
-                    errs() << "[debug] Struct type name: \"" << StructTypeName << "\"\n";
-                    errs() << "[debug] Field index: " << Index << "\n";
-                    errs() << "[debug] Keys in StaticFPMap:\n";
+                    // errs() << "[debug] In function: " << FuncName << ", line: " << Line << "\n";
+                    // errs() << "[debug] Struct type name: \"" << StructTypeName << "\"\n";
+                    // errs() << "[debug] Field index: " << Index << "\n";
+                    // errs() << "[debug] Keys in StaticFPMap:\n";
                     for (const auto &entry : StaticFPMap) {
                         errs() << "  - \"" << entry.first << "\"\n";
                     }
@@ -601,7 +592,7 @@ void CallGraphPass::CollectStaticIndirectCallCandidates(Module *M) {
                     // Lookup StaticFPMap
                     auto typeIt = StaticFPMap.find(StructTypeName);
                     if (typeIt == StaticFPMap.end()) {
-                        errs() << "[debug] StaticFPMap has no entry for type: \"" << StructTypeName << "\"\n";
+                        // errs() << "[debug] StaticFPMap has no entry for type: \"" << StructTypeName << "\"\n";
                         continue;
                     }
 
@@ -610,11 +601,11 @@ void CallGraphPass::CollectStaticIndirectCallCandidates(Module *M) {
                             size_t first = entry.find(':');
                             size_t second = entry.find(':', first + 1);
 
-                            errs() << "[debug] Raw entry: " << entry << "\n";
-                            errs() << "[debug] Parsed indices: first=" << first << ", second=" << second << "\n";
+                            // errs() << "[debug] Raw entry: " << entry << "\n";
+                            // errs() << "[debug] Parsed indices: first=" << first << ", second=" << second << "\n";
 
                             if (first == std::string::npos || second == std::string::npos) {
-                                errs() << "[debug] Skipping entry due to bad format\n";
+                                // errs() << "[debug] Skipping entry due to bad format\n";
                                 continue;
                             }
 
@@ -624,19 +615,19 @@ void CallGraphPass::CollectStaticIndirectCallCandidates(Module *M) {
                             // Trim whitespace
                             funcName.erase(std::remove_if(funcName.begin(), funcName.end(), ::isspace), funcName.end());
 
-                            errs() << "[debug] RAW FUNC NAME: >" << funcName << "< (len=" << funcName.length() << ")\n";
-                            errs() << "[debug] Parsed idx=" << idx << ", funcName=" << funcName << "\n";
+                            // errs() << "[debug] RAW FUNC NAME: >" << funcName << "< (len=" << funcName.length() << ")\n";
+                            // errs() << "[debug] Parsed idx=" << idx << ", funcName=" << funcName << "\n";
 
                             if (idx == Index) {
                                 // Insert into IndirectCallCandidates
                                 auto &TargetSet = IndirectCallCandidates[ModName][FuncName][Line];
                                 auto result = TargetSet.insert(funcName);
-                                errs() << "[debug] Inserted: " << funcName
-                                       << " -> success? " << result.second << ", set size: " << TargetSet.size() << "\n";
+                                // errs() << "[debug] Inserted: " << funcName
+                                //        << " -> success? " << result.second << ", set size: " << TargetSet.size() << "\n";
                                 
-                                errs() << "[debug] INSERTED: \"" << funcName
-                                       << "\" INTO IndirectCallCandidates[" << ModName
-                                       << "][" << FuncName << "][" << Line << "]\n";
+                                // errs() << "[debug] INSERTED: \"" << funcName
+                                //        << "\" INTO IndirectCallCandidates[" << ModName
+                                //        << "][" << FuncName << "][" << Line << "]\n";
                             }
                         }
                     }

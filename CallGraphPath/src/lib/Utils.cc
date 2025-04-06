@@ -152,12 +152,12 @@ void PrintCallGraph(DirectCallMap &DirectCallMap, IndirectCallMap &IndirectCallM
 
 void PrintResolvedIndirectCalls(const IndirectCallCandidates &Map) {
     std::cout << "==== Resolved Indirect Calls ====" << std::endl;
-    std::cout << "[debug] Total modules: " << Map.size() << std::endl;
-    std::cout << "[debug] address of Map = " << &Map << std::endl;
+    // std::cout << "[debug] Total modules: " << Map.size() << std::endl;
+    // std::cout << "[debug] address of Map = " << &Map << std::endl;
 
     for (const auto &modEntry : Map) {
         const std::string &mod = modEntry.first;
-        std::cout << "[debug] Module: " << mod << ", functions: " << modEntry.second.size() << std::endl;
+        // std::cout << "[debug] Module: " << mod << ", functions: " << modEntry.second.size() << std::endl;
 
         for (const auto &funcEntry : modEntry.second) {
             const std::string &caller = funcEntry.first;
@@ -166,8 +166,8 @@ void PrintResolvedIndirectCalls(const IndirectCallCandidates &Map) {
                 unsigned line = lineEntry.first;
                 const auto &targets = lineEntry.second;
                 std::cout << "Module: [" << mod << "], Caller: [" << caller << "], Line: " << line << std::endl;
-                
-                std::cout << "[debug] line: " << line << ", #targets: " << targets.size() << std::endl;
+
+                // std::cout << "[debug] line: " << line << ", #targets: " << targets.size() << std::endl;
 
                 std::cout << mod << ": " << caller << " [line " << line << "] -> ";
                 for (const auto &target : targets) {
