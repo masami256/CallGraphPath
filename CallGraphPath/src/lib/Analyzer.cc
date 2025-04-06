@@ -15,7 +15,7 @@ using namespace llvm;
 cl::list<std::string> InputFilenames(
     cl::Positional, cl::OneOrMore, cl::desc("<input bitcode files>"));
 
-GlobalContext GlobalCtx;
+ModuleList Modules;
 
 int main(int argc, char **argv) 
 {
@@ -38,11 +38,11 @@ int main(int argc, char **argv)
 
         Module *Module = M.release();
         StringRef ModuleName = StringRef(strdup(InputFilenames[i].data()));
-        GlobalCtx.Modules.push_back(std::make_pair(Module, ModuleName));
+        Modules.push_back(std::make_pair(Module, ModuleName));
     }
 
-    CallGraphPass CGPass(&GlobalCtx, "CallGraphPass");
-	CGPass.run(GlobalCtx.Modules);
+    CallGraphPass CGPass("CallGraphPass");
+	CGPass.run(Modules);
 
 	return 0;
 }

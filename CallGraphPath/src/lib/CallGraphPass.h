@@ -72,11 +72,10 @@ class CallGraphPass {
         Function* resolveCalledFunction(Value *V);
         void CollectStaticIndirectCallCandidates(Module *M);
     protected:
-        GlobalContext *Ctx;
         const char * ID;
     public:
-        CallGraphPass(GlobalContext *Ctx_, const char *ID_)
-        : Ctx(Ctx_), ID(ID_) { }
+        CallGraphPass(const char *ID_)
+        : ID(ID_) { }
         
         void run(ModuleList &modules);
         bool CollectInformation(Module *M);

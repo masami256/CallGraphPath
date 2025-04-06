@@ -11,11 +11,4 @@ typedef std::set<std::string> StrSet;
 typedef llvm::SmallPtrSet<llvm::Function*, 8> FuncSet;
 
 using namespace llvm;
-struct GlobalContext {
-    GlobalContext() {
-        // Initialize the context
-    }
 
-    // Modules.
-	ModuleList Modules;
-};
