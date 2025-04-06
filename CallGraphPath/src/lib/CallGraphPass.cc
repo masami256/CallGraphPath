@@ -41,56 +41,36 @@ void IterativeModulePass::run(ModuleList &modules) {
 }
 
 bool CallGraphPass::CollectInformation(Module *M) {
-    // Get the module name (e.g., file path of the .bc file)
     std::string ModName = M->getName().str();
+    errs() << "Collecting information from module: " << ModName << "\n";
 
-	errs() << "Collecting information from module: " << ModName << "\n";
-
-	CollectFunctionProtoTypes(M);
-	CollectStaticFunctionPointerInit(M);
-	CollectDynamicFunctionPointerInit(M);
+    // 各種情報収集
+    CollectFunctionProtoTypes(M);
+    CollectStaticFunctionPointerInit(M);
+    CollectStaticIndirectCallCandidates(M);
+    CollectDynamicFunctionPointerInit(M);
     CollectIndirectCallCandidates(M);
     CollectGlobalFunctionPointerInit(M);
     CollectFunctionPointerArguments(M);
     CollectCallInstructions(M);
 
+    // デバッグ・確認用出力（任意）
+    PrintStaticFunctionPointerMap(StaticFPMap);
+    DumpEntireIndirectCallCandidates(IndirectCallCandidates);
+    // PrintResolvedIndirectCalls(IndirectCallCandidates);
+
     return true;
 }
-
 
 bool CallGraphPass::IdentifyTargets(Module *M) {
     std::string ModName = M->getName().str();
-
-    for (Function &F : *M) {
-        if (F.isDeclaration()) continue;
-
-        std::string Caller = F.getName().str();
-
-        for (BasicBlock &BB : F) {
-            for (Instruction &I : BB) {
-                if (auto *call = dyn_cast<CallBase>(&I)) {
-                    Value *calledVal = call->getCalledOperand()->stripPointerCasts();
-
-                    // Skip if it's a direct function call
-                    if (isa<Function>(calledVal)) {
-                        continue;
-                    }
-
-                    unsigned Line = 0;
-                    if (DILocation *Loc = I.getDebugLoc())
-                        Line = Loc->getLine();
-
-                    if (Function *target = resolveCalledFunction(calledVal)) {
-                        IndirectCallCandidates[ModName][Caller][Line].insert(target->getName().str());
-                    }
-                }
-            }
-        }
-    }
+    errs() << "Identifying targets in module: " << ModName << "\n";
 
     PrintResolvedIndirectCalls(IndirectCallCandidates);
+
     return true;
 }
+
 
 void CallGraphPass::CollectFunctionProtoTypes(Module *M) {
 	std::string ModName = M->getName().str();
@@ -535,4 +515,133 @@ Function* CallGraphPass::resolveCalledFunction(Value *V) {
     }
 
     return nullptr; // Not resolved in this simple version
+}
+
+
+// Resolve the real LoadInst that retrieves the function pointer
+// Utility: resolve LoadInst from called operand (handles bitcasts, constants, etc.)
+LoadInst* resolveCalledOperand(Value *called) {
+    while (true) {
+        if (auto *LI = dyn_cast<LoadInst>(called)) {
+            return LI;
+        } else if (auto *CE = dyn_cast<ConstantExpr>(called)) {
+            if (CE->isCast()) {
+                called = CE->getOperand(0);
+            } else {
+                return nullptr;
+            }
+        } else if (auto *BI = dyn_cast<BitCastInst>(called)) {
+            called = BI->getOperand(0);
+        } else if (auto *SI = dyn_cast<AddrSpaceCastInst>(called)) {
+            called = SI->getOperand(0);
+        } else {
+            return nullptr;
+        }
+    }
+}
+
+void CallGraphPass::CollectStaticIndirectCallCandidates(Module *M) {
+    std::string ModName = M->getName().str();
+    errs() << "[debug] address of this->IndirectCallCandidates = " << &IndirectCallCandidates << "\n";
+
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
+        std::string FuncName = F.getName().str();
+
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                if (auto *call = dyn_cast<CallBase>(&I)) {
+                    LoadInst *loadInst = resolveCalledOperand(call->getCalledOperand());
+                    if (!loadInst) continue;
+
+                    auto *GEP = dyn_cast<GetElementPtrInst>(loadInst->getPointerOperand());
+                    if (!GEP) continue;
+
+                    std::string StructTypeName = "unknown";
+                    unsigned Index = 0;
+
+                    // Get struct type name from GEP
+                    Type *elementType = GEP->getSourceElementType();
+                    if (auto *ST = dyn_cast<StructType>(elementType)) {
+                        if (ST->hasName()) {
+                            StructTypeName = ST->getName().str();
+                        }
+                    }
+
+                    // Get field index
+                    if (GEP->getNumOperands() >= 3) {
+                        Value *idxVal = GEP->getOperand(GEP->getNumOperands() - 1);
+                        if (auto *CI = dyn_cast<ConstantInt>(idxVal)) {
+                            Index = CI->getZExtValue();
+                        }
+                    }
+
+                    // Get source line number
+                    unsigned Line = 0;
+                    if (DILocation *Loc = I.getDebugLoc()) {
+                        Line = Loc->getLine();
+                    }
+
+                    // Normalize struct type name if needed
+                    size_t dot = StructTypeName.find('.');
+                    if (dot != std::string::npos &&
+                        StructTypeName.substr(dot).find_first_not_of("0123456789.") == std::string::npos) {
+                        StructTypeName = StructTypeName.substr(0, dot);
+                    }
+
+                    // === Debug info ===
+                    errs() << "[debug] In function: " << FuncName << ", line: " << Line << "\n";
+                    errs() << "[debug] Struct type name: \"" << StructTypeName << "\"\n";
+                    errs() << "[debug] Field index: " << Index << "\n";
+                    errs() << "[debug] Keys in StaticFPMap:\n";
+                    for (const auto &entry : StaticFPMap) {
+                        errs() << "  - \"" << entry.first << "\"\n";
+                    }
+
+                    // Lookup StaticFPMap
+                    auto typeIt = StaticFPMap.find(StructTypeName);
+                    if (typeIt == StaticFPMap.end()) {
+                        errs() << "[debug] StaticFPMap has no entry for type: \"" << StructTypeName << "\"\n";
+                        continue;
+                    }
+
+                    for (const auto &varEntry : typeIt->second) {
+                        for (const std::string &entry : varEntry.second) {
+                            size_t first = entry.find(':');
+                            size_t second = entry.find(':', first + 1);
+
+                            errs() << "[debug] Raw entry: " << entry << "\n";
+                            errs() << "[debug] Parsed indices: first=" << first << ", second=" << second << "\n";
+
+                            if (first == std::string::npos || second == std::string::npos) {
+                                errs() << "[debug] Skipping entry due to bad format\n";
+                                continue;
+                            }
+
+                            unsigned idx = std::stoul(entry.substr(0, first));
+                            std::string funcName = entry.substr(first + 1, second - first - 1);
+
+                            // Trim whitespace
+                            funcName.erase(std::remove_if(funcName.begin(), funcName.end(), ::isspace), funcName.end());
+
+                            errs() << "[debug] RAW FUNC NAME: >" << funcName << "< (len=" << funcName.length() << ")\n";
+                            errs() << "[debug] Parsed idx=" << idx << ", funcName=" << funcName << "\n";
+
+                            if (idx == Index) {
+                                // Insert into IndirectCallCandidates
+                                auto &TargetSet = IndirectCallCandidates[ModName][FuncName][Line];
+                                auto result = TargetSet.insert(funcName);
+                                errs() << "[debug] Inserted: " << funcName
+                                       << " -> success? " << result.second << ", set size: " << TargetSet.size() << "\n";
+                                
+                                errs() << "[debug] INSERTED: \"" << funcName
+                                       << "\" INTO IndirectCallCandidates[" << ModName
+                                       << "][" << FuncName << "][" << Line << "]\n";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

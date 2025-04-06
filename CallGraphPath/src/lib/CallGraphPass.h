@@ -34,8 +34,11 @@ typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> D
 // For indirect calls: module → caller → list of "called_value(IR text):line"
 typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> IndirectCallMap;
 
-// module → caller → line → set of candidate callees
-typedef std::map<std::string, std::map<std::string, std::map<unsigned, std::set<std::string>>>> IndirectCallCandidates;
+using IndirectCallCandidates = std::map<
+    std::string,                         // Module
+    std::map<std::string,               // Function name
+        std::map<unsigned, std::set<std::string>>>>;  // Line -> Set of function names
+
 
 class CallGraphPass : public IterativeModulePass {
     private:
@@ -67,6 +70,7 @@ class CallGraphPass : public IterativeModulePass {
             StringRef CalledValueStr, unsigned Line);
 
         Function* resolveCalledFunction(Value *V);
+        void CollectStaticIndirectCallCandidates(Module *M);
 
     public:
         CallGraphPass(GlobalContext *Ctx_)
