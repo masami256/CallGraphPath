@@ -28,13 +28,22 @@ typedef std::map<
     >
 > FunctionPtrArgMap;
 
+// For direct calls: module → caller → list of "callee:line"
+typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> DirectCallMap;
+
+// For indirect calls: module → caller → list of "called_value(IR text):line"
+typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> IndirectCallMap;
+
+
 class CallGraphPass : public IterativeModulePass {
     private:
         ModuleFunctionMap ModuleFuncMap;
         StaticFunctionPointerMap StaticFPMap;
         DynamicFunctionPointerMap DynamicFPMap;
         FunctionPtrArgMap FuncPtrArgMap;
-
+        DirectCallMap DirectCallMap;
+        IndirectCallMap IndirectCallMap;
+        
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerInit(Module *M);
         void CollectDynamicFunctionPointerInit(Module *M);
@@ -47,6 +56,12 @@ class CallGraphPass : public IterativeModulePass {
         void RecordFuncPtrArgument(StringRef ModuleName, StringRef CallerFunc,
             StringRef PassedFunc, StringRef CalleeFunc,
             unsigned ArgIndex, unsigned LineNumber);
+        void RecordDirectCall(StringRef ModuleName, StringRef CallerFunc,
+            StringRef CalleeFunc, unsigned Line);
+        void RecordIndirectCall(StringRef ModuleName, StringRef CallerFunc,
+            StringRef CalledValueStr, unsigned Line);
+
+        void CollectCallInstructions(Module *M);
 
     public:
         CallGraphPass(GlobalContext *Ctx_)

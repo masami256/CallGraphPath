@@ -11,6 +11,8 @@
 #include <iostream>
 #include <list>
 
+#include "Utils.h"
+
 using namespace llvm;
 
 void IterativeModulePass::run(ModuleList &modules) {
@@ -43,7 +45,9 @@ bool CallGraphPass::CollectInformation(Module *M) {
 	CollectDynamicFunctionPointerInit(M);
     CollectGlobalFunctionPointerInit(M);
     CollectFunctionPointerArguments(M);
-
+    CollectCallInstructions(M);
+    
+    PrintCallGraph(DirectCallMap, IndirectCallMap);
     return true;
 }
 
@@ -306,4 +310,64 @@ void CallGraphPass::RecordFuncPtrArgument(
     std::string Entry = PassedFunc.str() + ":arg" + std::to_string(ArgIndex) +
                         ":" + CalleeFunc.str() + ":" + std::to_string(LineNumber);
     FuncPtrArgMap[ModuleName.str()][CallerFunc.str()].push_back(Entry);
+}
+
+void CallGraphPass::CollectCallInstructions(Module *M) {
+    std::string ModName = M->getName().str();
+
+    // Iterate through all functions in the module
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue; // Skip function declarations
+
+        std::string CallerName = F.getName().str();
+
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                // Only process call and invoke instructions
+                if (auto *call = dyn_cast<CallBase>(&I)) {
+                    // Try to get line number from debug info
+                    unsigned Line = 0;
+                    if (DILocation *Loc = I.getDebugLoc()) {
+                        Line = Loc->getLine();
+                    }
+
+                    // Get the called value (may be direct or indirect)
+                    Value *calledVal = call->getCalledOperand()->stripPointerCasts();
+
+                    if (Function *CalleeFunc = dyn_cast<Function>(calledVal)) {
+                        // Direct call detected
+                        RecordDirectCall(ModName, CallerName, CalleeFunc->getName(), Line);
+                    } else {
+                        // Indirect call (e.g. through function pointer)
+                        std::string CalledExpr;
+                        raw_string_ostream RSO(CalledExpr);
+                        calledVal->print(RSO);
+                        RecordIndirectCall(ModName, CallerName, RSO.str(), Line);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void CallGraphPass::RecordDirectCall(StringRef ModuleName,
+    StringRef CallerFunc,
+    StringRef CalleeFunc,
+    unsigned Line) {
+    // Create a string like "callee_name:line_number"
+    std::string Entry = CalleeFunc.str() + ":" + std::to_string(Line);
+
+    // Store into the DirectCallMap
+    DirectCallMap[ModuleName.str()][CallerFunc.str()].push_back(Entry);
+}
+
+void CallGraphPass::RecordIndirectCall(StringRef ModuleName,
+    StringRef CallerFunc,
+    StringRef CalledValueStr,
+    unsigned Line) {
+    // Create a string like "called_expression:line_number"
+    std::string Entry = CalledValueStr.str() + ":" + std::to_string(Line);
+
+    // Store into the IndirectCallMap
+    IndirectCallMap[ModuleName.str()][CallerFunc.str()].push_back(Entry);
 }

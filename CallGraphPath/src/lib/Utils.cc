@@ -100,3 +100,53 @@ void PrintStaticFunctionPointerMap(StaticFunctionPointerMap &StaticFPMap) {
 
     std::cout << "==== End of Map ====" << std::endl;
 }
+
+void PrintCallGraph(DirectCallMap &DirectCallMap, IndirectCallMap &IndirectCallMap, bool verbose) {
+    std::cout << "==== Direct Call Graph ====" << std::endl;
+
+    for (const auto &modEntry : DirectCallMap) {
+        const std::string &modName = modEntry.first;
+        const auto &funcMap = modEntry.second;
+
+        for (const auto &funcEntry : funcMap) {
+            const std::string &caller = funcEntry.first;
+            const auto &callees = funcEntry.second;
+
+            for (const std::string &entry : callees) {
+                // entry format: callee:line
+                size_t sep = entry.find_last_of(':');
+                std::string callee = entry.substr(0, sep);
+                std::string line = entry.substr(sep + 1);
+
+                std::cout << modName << ": " << caller << " -> " << callee << " [line " << line << "]" << std::endl;
+            }
+        }
+    }
+
+    std::cout << std::endl << "==== Indirect Call Graph ====" << std::endl;
+
+    for (const auto &modEntry : IndirectCallMap) {
+        const std::string &modName = modEntry.first;
+        const auto &funcMap = modEntry.second;
+
+        for (const auto &funcEntry : funcMap) {
+            const std::string &caller = funcEntry.first;
+            const auto &entries = funcEntry.second;
+
+            for (const std::string &entry : entries) {
+                // entry format: calledExpr:line
+                size_t sep = entry.find_last_of(':');
+                std::string expr = entry.substr(0, sep);
+                std::string line = entry.substr(sep + 1);
+
+                std::cout << modName << ": " << caller << " -> [indirect] [line " << line << "]" << std::endl;
+
+                if (verbose) {
+                    std::cout << "    IR: " << expr << std::endl;
+                }
+            }
+        }
+    }
+
+    std::cout << "==== End of Call Graph ====" << std::endl;
+}
