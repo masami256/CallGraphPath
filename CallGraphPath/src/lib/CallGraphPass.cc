@@ -295,38 +295,27 @@ void CallGraphPass::CollectFunctionPointerArguments(Module *M) {
                                 Line = Loc->getLine();
                             }
 
-                            // Log before updating FuncPtrArgMap
-                            errs() << "[debug] Before RecordFuncPtrArgument: FuncPtrArgMap contents:\n";
-                            for (const auto &modEntry : FuncPtrArgMap) {
-                                errs() << "Module: " << modEntry.first << "\n";
-                                for (const auto &funcEntry : modEntry.second) {
-                                    errs() << "  Function: " << funcEntry.first << "\n";
-                                    for (const auto &entry : funcEntry.second) {
-                                        errs() << "    Entry: "
-                                            << std::get<0>(entry) << ":" << std::get<1>(entry) << ":" 
-                                            << std::get<2>(entry) << ":" << std::get<3>(entry) << "\n";
-                                    }
-                                }
-                            }
-
                             // Register the function pointer argument in FuncPtrArgMap
                             RecordFuncPtrArgument(ModName, Callee->getName().str(), PassedFunc->getName().str(), CallerName, i, Line);
                             errs() << "[debug] Registered function pointer argument: " 
                                    << PassedFunc->getName() << " for " << CallerName << " in " << ModName << " at line " << Line << "\n";
                             
                             // Log FuncPtrArgMap after update
-                            errs() << "[debug] After RecordFuncPtrArgument: FuncPtrArgMap contents:\n";
+                            // After push_back, log the entire FuncPtrArgMap content
+                            errs() << "================\n";
+                            errs() << "[debug] After push_back, FuncPtrArgMap contents: \n";
                             for (const auto &modEntry : FuncPtrArgMap) {
                                 errs() << "Module: " << modEntry.first << "\n";
                                 for (const auto &funcEntry : modEntry.second) {
                                     errs() << "  Function: " << funcEntry.first << "\n";
                                     for (const auto &entry : funcEntry.second) {
                                         errs() << "    Entry: "
-                                            << std::get<0>(entry) << ":" << std::get<1>(entry) << ":" 
-                                            << std::get<2>(entry) << ":" << std::get<3>(entry) << "\n";
+                                                << std::get<0>(entry) << ":" << std::get<1>(entry) << ":" 
+                                                << std::get<2>(entry) << ":" << std::get<3>(entry) << "\n";
                                     }
                                 }
                             }
+                            errs() << "================\n";
                         } else {
                             errs() << "[debug] PassedFunc is false: loop " << i << "BB: [" << BB << "] I: [" << I << "]\n";
                         }
