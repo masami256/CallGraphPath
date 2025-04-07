@@ -12,11 +12,16 @@ void PrintFuncPtrArgumentMap(FunctionPtrArgMap &FuncPtrArgMap) {
 
         for (const auto &funcEntry : funcMap) {
             const std::string &caller = funcEntry.first;
-            const std::vector<std::string> &entries = funcEntry.second;
+            const auto &entries = funcEntry.second;
 
             std::cout << "  Caller Function: " << caller << std::endl;
-            for (const std::string &entry : entries) {
-                std::cout << "    " << entry << std::endl;
+            for (const auto &entry : entries) {
+                const std::string &funcName = std::get<0>(entry);
+                unsigned argIndex = std::get<1>(entry);
+                const std::string &caller = std::get<2>(entry);
+                unsigned callLine = std::get<3>(entry);
+                
+                std::cout << "    " << funcName << ":" << argIndex << ":" << caller << ":" << callLine << std::endl;
             }
         }
     }
@@ -165,6 +170,11 @@ void PrintResolvedIndirectCalls(const IndirectCallCandidates &Map) {
             for (const auto &lineEntry : funcEntry.second) {
                 unsigned line = lineEntry.first;
                 const auto &targets = lineEntry.second;
+                std::cout << "[debug] Module: " << mod 
+                    << ", Caller: " << caller 
+                    << ", Line: " << line 
+                    << ", #targets: " << targets.size() << std::endl;
+                    
                 std::cout << "Module: [" << mod << "], Caller: [" << caller << "], Line: " << line << std::endl;
 
                 // std::cout << "[debug] line: " << line << ", #targets: " << targets.size() << std::endl;
@@ -198,6 +208,31 @@ void DumpEntireIndirectCallCandidates(const IndirectCallCandidates &Map) {
     std::cout << "==== End Dump ====" << std::endl;
 }
 
+
+void PrintFunctionPtrArgMap(const FunctionPtrArgMap &Map) {
+    std::cout << "==== Function Pointer Argument Map ====" << std::endl;
+
+    for (const auto &modEntry : Map) {
+        const std::string &module = modEntry.first;
+        std::cout << "Module: " << module << std::endl;
+
+        for (const auto &funcEntry : modEntry.second) {
+            const std::string &callee = funcEntry.first;
+            std::cout << "  Function: " << callee << std::endl;
+
+            for (const auto &tuple : funcEntry.second) {
+                const std::string &funcName = std::get<0>(tuple);
+                unsigned argIdx = std::get<1>(tuple);
+                const std::string &caller = std::get<2>(tuple);
+                unsigned line = std::get<3>(tuple);
+
+                std::cout << "    " << funcName << ":" << argIdx << ":" << caller << ":" << line << std::endl;
+            }
+        }
+    }
+
+    std::cout << "==== End of Map ====" << std::endl;
+}
 
 
 

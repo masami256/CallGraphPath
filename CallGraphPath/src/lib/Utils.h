@@ -9,3 +9,4 @@ void PrintStaticFunctionPointerMap(StaticFunctionPointerMap &StaticFPMap);
 void PrintCallGraph(DirectCallMap &DirectCallMap, IndirectCallMap &IndirectCallMap, bool verbose = false);
 void PrintResolvedIndirectCalls(const IndirectCallCandidates &IndirectCallCandidates);
 void DumpEntireIndirectCallCandidates(const IndirectCallCandidates &Map);
+void PrintFunctionPtrArgMap(const FunctionPtrArgMap &Map);

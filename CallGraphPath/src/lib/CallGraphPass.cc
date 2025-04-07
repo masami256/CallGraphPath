@@ -52,12 +52,14 @@ bool CallGraphPass::CollectInformation(Module *M) {
     CollectIndirectCallCandidates(M);
     CollectGlobalFunctionPointerInit(M);
     CollectFunctionPointerArguments(M);
+
+    PrintFunctionPtrArgMap(FuncPtrArgMap);
     CollectCallInstructions(M);
 
     // For debugging
-    PrintStaticFunctionPointerMap(StaticFPMap);
-    DumpEntireIndirectCallCandidates(IndirectCallCandidates);
-    // PrintResolvedIndirectCalls(IndirectCallCandidates);
+    // PrintStaticFunctionPointerMap(StaticFPMap);
+    // DumpEntireIndirectCallCandidates(IndirectCallCandidates);
+    PrintResolvedIndirectCalls(IndirectCallCandidates);
 
     return true;
 }
@@ -65,8 +67,6 @@ bool CallGraphPass::CollectInformation(Module *M) {
 bool CallGraphPass::IdentifyTargets(Module *M) {
     std::string ModName = M->getName().str();
     errs() << "Identifying targets in module: " << ModName << "\n";
-
-    PrintResolvedIndirectCalls(IndirectCallCandidates);
 
     return true;
 }
@@ -266,6 +266,7 @@ void CallGraphPass::CollectFunctionPointerArguments(Module *M) {
         for (BasicBlock &BB : F) {
             for (Instruction &I : BB) {
                 if (auto *call = dyn_cast<CallBase>(&I)) {
+                    // errs() << "[debug] Check: BB: [" << BB << "] : I:[" << I << "]\n";
                     Function *Callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
                     if (!Callee) continue;
 
@@ -273,28 +274,61 @@ void CallGraphPass::CollectFunctionPointerArguments(Module *M) {
                         Value *Arg = call->getArgOperand(i);
                         Function *PassedFunc = nullptr;
 
+                        // Direct function pointer passed
                         if ((PassedFunc = dyn_cast<Function>(Arg))) {
-                            // ok
+                            errs() << "[debug] PassedFunc is direct: " << PassedFunc->getName() << "\n";
                         } else if (auto *CE = dyn_cast<ConstantExpr>(Arg)) {
                             if (CE->isCast()) {
                                 PassedFunc = dyn_cast<Function>(CE->getOperand(0));
+                                if (PassedFunc) {
+                                    errs() << "[debug] PassedFunc is casted: " << PassedFunc->getName() << "\n";
+                                } else {
+                                    errs() << "[debug] PassedFunc cast failed\n";
+                                }
                             }
                         }
 
+                        // Check if PassedFunc is set and log
                         if (PassedFunc) {
                             unsigned Line = 0;
                             if (DILocation *Loc = I.getDebugLoc()) {
                                 Line = Loc->getLine();
                             }
 
-                            RecordFuncPtrArgument(
-                                ModName,
-                                CallerName,
-                                PassedFunc->getName(),
-                                Callee->getName(),
-                                i,
-                                Line
-                            );
+                            // Log before updating FuncPtrArgMap
+                            errs() << "[debug] Before RecordFuncPtrArgument: FuncPtrArgMap contents:\n";
+                            for (const auto &modEntry : FuncPtrArgMap) {
+                                errs() << "Module: " << modEntry.first << "\n";
+                                for (const auto &funcEntry : modEntry.second) {
+                                    errs() << "  Function: " << funcEntry.first << "\n";
+                                    for (const auto &entry : funcEntry.second) {
+                                        errs() << "    Entry: "
+                                            << std::get<0>(entry) << ":" << std::get<1>(entry) << ":" 
+                                            << std::get<2>(entry) << ":" << std::get<3>(entry) << "\n";
+                                    }
+                                }
+                            }
+
+                            // Register the function pointer argument in FuncPtrArgMap
+                            RecordFuncPtrArgument(ModName, Callee->getName().str(), PassedFunc->getName().str(), CallerName, i, Line);
+                            errs() << "[debug] Registered function pointer argument: " 
+                                   << PassedFunc->getName() << " for " << CallerName << " in " << ModName << " at line " << Line << "\n";
+                            
+                            // Log FuncPtrArgMap after update
+                            errs() << "[debug] After RecordFuncPtrArgument: FuncPtrArgMap contents:\n";
+                            for (const auto &modEntry : FuncPtrArgMap) {
+                                errs() << "Module: " << modEntry.first << "\n";
+                                for (const auto &funcEntry : modEntry.second) {
+                                    errs() << "  Function: " << funcEntry.first << "\n";
+                                    for (const auto &entry : funcEntry.second) {
+                                        errs() << "    Entry: "
+                                            << std::get<0>(entry) << ":" << std::get<1>(entry) << ":" 
+                                            << std::get<2>(entry) << ":" << std::get<3>(entry) << "\n";
+                                    }
+                                }
+                            }
+                        } else {
+                            errs() << "[debug] PassedFunc is false: loop " << i << "BB: [" << BB << "] I: [" << I << "]\n";
                         }
                     }
                 }
@@ -303,12 +337,14 @@ void CallGraphPass::CollectFunctionPointerArguments(Module *M) {
     }
 }
 
+
+
+
 void CallGraphPass::CollectIndirectCallCandidates(Module *M) {
     std::string ModName = M->getName().str();
 
     for (Function &F : *M) {
         if (F.isDeclaration()) continue;
-
         std::string FuncName = F.getName().str();
 
         for (BasicBlock &BB : F) {
@@ -319,70 +355,120 @@ void CallGraphPass::CollectIndirectCallCandidates(Module *M) {
                     // Skip direct calls
                     if (isa<Function>(called)) continue;
 
-                    std::string AssignedFromStr;
-
-                    // Try to trace back if this is a value loaded from a pointer
-                    if (Instruction *calledInst = dyn_cast<Instruction>(called)) {
-                        if (auto *load = dyn_cast<LoadInst>(calledInst)) {
-                            Value *loadedFrom = load->getPointerOperand();
-                            raw_string_ostream RSO(AssignedFromStr);
-                            loadedFrom->print(RSO);
-                            RSO.flush();
-                        } else {
-                            // Not a load, just print operand
-                            raw_string_ostream RSO(AssignedFromStr);
-                            called->print(RSO);
-                            RSO.flush();
-                        }
-                    } else {
-                        // Not an instruction, just print operand
-                        raw_string_ostream RSO(AssignedFromStr);
-                        called->print(RSO);
-                        RSO.flush();
-                    }
-
-                    // Get debug line number if available
                     unsigned Line = 0;
-                    if (DILocation *Loc = I.getDebugLoc()) {
+                    if (DILocation *Loc = I.getDebugLoc())
                         Line = Loc->getLine();
-                    }
 
                     std::set<std::string> CandidateFuncs;
 
-                    // Search DynamicFPMap for matching pointer assignments
-                    auto modIt = DynamicFPMap.find(ModName);
-                    if (modIt != DynamicFPMap.end()) {
-                        auto funcIt = modIt->second.find(FuncName);
-                        if (funcIt != modIt->second.end()) {
-                            for (const std::string &entry : funcIt->second) {
-                                // entry format: "foo:%ptr:line"
-                                size_t colon1 = entry.find(':');
-                                size_t colon2 = entry.find(':', colon1 + 1);
-                                if (colon1 == std::string::npos || colon2 == std::string::npos)
-                                    continue;
+                    // === Phase 1: DynamicFPMap matching ===
+                    std::string AssignedFromStr;
+                    Value *loadedFrom = nullptr; // Declare loadedFrom outside the conditional block
+                    if (Instruction *calledInst = dyn_cast<Instruction>(called)) {
+                        if (auto *load = dyn_cast<LoadInst>(calledInst)) {
+                            loadedFrom = load->getPointerOperand();  // Assign to loadedFrom
+                            raw_string_ostream RSO(AssignedFromStr);
+                            loadedFrom->print(RSO);
+                            RSO.flush();
 
-                                std::string targetFunc = entry.substr(0, colon1);
-                                std::string assignedTo = entry.substr(colon1 + 1, colon2 - colon1 - 1);
+                            auto modIt = DynamicFPMap.find(ModName);
+                            if (modIt != DynamicFPMap.end()) {
+                                auto funcIt = modIt->second.find(FuncName);
+                                if (funcIt != modIt->second.end()) {
+                                    for (const auto &entry : funcIt->second) {
+                                        size_t colon1 = entry.find(':');
+                                        size_t colon2 = entry.find(':', colon1 + 1);
+                                        size_t colon3 = entry.find(':', colon2 + 1);
+                                        
+                                        std::string funcName = entry.substr(0, colon1);
+                                        unsigned argIdx = std::stoi(entry.substr(colon1 + 1, colon2 - colon1 - 1));
+                                        std::string assignedTo = entry.substr(colon2 + 1, colon3 - colon2 - 1);
+                                        unsigned line = std::stoi(entry.substr(colon3 + 1));
+                                        
+                                        // Debugging DynamicFPMap match
+                                        errs() << "[debug] Matched entry: " 
+                                                << "funcName: " << funcName 
+                                                << ", argIdx: " << argIdx 
+                                                << ", assignedTo: " << assignedTo 
+                                                << ", line: " << line << "\n";
 
-                                if (assignedTo == AssignedFromStr) {
-                                    CandidateFuncs.insert(targetFunc);
+                                        // Check if the assigned pointer matches
+                                        if (assignedTo == AssignedFromStr) {
+                                            CandidateFuncs.insert(funcName);
+                                            errs() << "[debug] Inserted from DynamicFPMap: " << funcName << "\n";
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    auto &TargetSet = IndirectCallCandidates[ModName][FuncName][Line];
-                    for (const auto &func : CandidateFuncs) {
-                        auto result = TargetSet.insert(func);
-                        // errs() << "[debug] Inserted: " << func
-                        //     << " -> success? " << result.second
-                        //     << ", set size: " << TargetSet.size() << "\n";
+                    // === Phase 2: Match against function pointer arguments ===
+                    for (Instruction &SI : F.getEntryBlock()) {
+                        if (auto *store = dyn_cast<StoreInst>(&SI)) {
+                            Value *storedVal = store->getValueOperand();
+                            Value *storePtr = store->getPointerOperand();
+
+                            // Same pointer load?
+                            if (storePtr == loadedFrom) {
+                                errs() << "[debug] Matched store/load pair: storePtr= " << *storePtr << ", ptr= " << *loadedFrom << "\n";
+
+                                for (unsigned argIdx = 0; argIdx < F.arg_size(); ++argIdx) {
+                                    Argument &arg = *(F.arg_begin() + argIdx);
+                                    if (storedVal == &arg) {
+                                        errs() << "[debug] Matched storedVal == arg[" << argIdx << "]: " << arg << "\n";
+                                        errs() << "[debug] Searching for FuncPtrArgMap[" << ModName << "][" << FuncName << "]\n";
+                                        
+                                        auto modIt = FuncPtrArgMap.find(ModName);
+                                        if (modIt != FuncPtrArgMap.end()) {
+                                            errs() << "[debug] modIt != FuncPtrArgMap.end()\n";
+                                            auto funcIt = modIt->second.find(FuncName);
+                                            if (funcIt != modIt->second.end()) {
+                                                errs() << "[debug] funcIt != modIt->second.end()\n";
+                                                for (const auto &entry : funcIt->second) {
+                                                    // Access tuple elements correctly
+                                                    std::string candidateFunc = std::get<0>(entry);  // Function name
+                                                    unsigned parsedArgIdx = std::get<1>(entry); // Argument index
+                                                    errs() << "[debug] parsedArgIdx: " << parsedArgIdx 
+                                                           << " argIdx: " << argIdx 
+                                                           << " FuncName: " << FuncName 
+                                                           << " std::get<2>(entry): " << std::get<2>(entry) << "\n";
+                                                    // Matching argument index and caller function name
+                                                    if (parsedArgIdx == argIdx && FuncName == std::get<2>(entry)) {
+                                                        CandidateFuncs.insert(candidateFunc);
+                                                        errs() << "[debug] Inserted from FuncPtrArgMap: " << candidateFunc << "\n";
+                                                    } else {
+                                                        errs() << "[debug] Do not insert data\n";
+                                                    }
+                                                }
+                                            } else {
+                                                errs() << "[debug] funcIt == modIt->second.end()\n";
+                                            }
+                                        } else {
+                                            errs() << "[debug] modIt == FuncPtrArgMap.end()\n";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // If CandidateFuncs is not empty, register the candidates
+                    if (!CandidateFuncs.empty()) {
+                        auto &TargetSet = IndirectCallCandidates[ModName][FuncName][Line];
+                        for (const auto &func : CandidateFuncs) {
+                            auto result = TargetSet.insert(func);
+                            errs() << "[debug] Final insert: " << func
+                                   << " at line " << Line << " (success=" << result.second << ")\n";
+                        }
                     }
                 }
             }
         }
     }
 }
+
+
 
 void CallGraphPass::RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName,
 	unsigned Index, StringRef FuncName, unsigned Line) {
@@ -402,17 +488,50 @@ void CallGraphPass::RecordDynamicFuncPtrAssignment(
 }
 
 void CallGraphPass::RecordFuncPtrArgument(
-    StringRef ModuleName,
-    StringRef CallerFunc,
-    StringRef PassedFunc,
-    StringRef CalleeFunc,
-    unsigned ArgIndex,
-    unsigned LineNumber)
-{
-    std::string Entry = PassedFunc.str() + ":arg" + std::to_string(ArgIndex) +
-                        ":" + CalleeFunc.str() + ":" + std::to_string(LineNumber);
-    FuncPtrArgMap[ModuleName.str()][CallerFunc.str()].push_back(Entry);
+    const std::string &ModName,
+    const std::string &CalleeName,
+    const std::string &PassedFuncName,
+    const std::string &CallerName,
+    unsigned argIdx,
+    unsigned Line) {
+
+    // Ensure we are adding to the correct module
+    if (FuncPtrArgMap.find(ModName) == FuncPtrArgMap.end()) {
+        FuncPtrArgMap[ModName] = std::map<std::string, std::vector<std::tuple<std::string, unsigned, std::string, unsigned>>>();
+    }
+
+    auto &modEntry = FuncPtrArgMap[ModName];
+    if (modEntry.find(CallerName) == modEntry.end()) {
+        modEntry[CallerName] = std::vector<std::tuple<std::string, unsigned, std::string, unsigned>>();
+    }
+
+    // errs() << "[debug] Before push_back, FuncPtrArgMap size: " << modEntry[CallerName].size() << "\n";
+    modEntry[CallerName].push_back(std::make_tuple(PassedFuncName, argIdx, CalleeName, Line));
+    // errs() << "[debug] After push_back, FuncPtrArgMap size: " << modEntry[CallerName].size() << "\n";
+
+    // Debug output to confirm that the map is updated
+    errs() << "[debug] Registered function pointer argument: "
+           << PassedFuncName << " for " << CallerName << " in " << ModName
+           << " at line " << Line << "\n";
+        
+    // After push_back, log the entire FuncPtrArgMap content
+    // errs() << "================\n";
+    // errs() << "[debug] After push_back, FuncPtrArgMap contents: \n";
+    // for (const auto &modEntry : FuncPtrArgMap) {
+    //     errs() << "Module: " << modEntry.first << "\n";
+    //     for (const auto &funcEntry : modEntry.second) {
+    //         errs() << "  Function: " << funcEntry.first << "\n";
+    //         for (const auto &entry : funcEntry.second) {
+    //             errs() << "    Entry: "
+    //                     << std::get<0>(entry) << ":" << std::get<1>(entry) << ":" 
+    //                     << std::get<2>(entry) << ":" << std::get<3>(entry) << "\n";
+    //         }
+    //     }
+    // }
+    // errs() << "================\n";
+
 }
+
 
 void CallGraphPass::CollectCallInstructions(Module *M) {
     std::string ModName = M->getName().str();
@@ -636,3 +755,4 @@ void CallGraphPass::CollectStaticIndirectCallCandidates(Module *M) {
         }
     }
 }
+

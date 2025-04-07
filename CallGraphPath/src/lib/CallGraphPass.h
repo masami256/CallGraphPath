@@ -21,11 +21,10 @@ typedef std::map<
 > DynamicFunctionPointerMap;
 
 typedef std::map<
-    std::string, // Module Name（Module->getName()）
+    std::string, // module
     std::map<
-        std::string,             // Callee function name 
-        std::vector<std::string> // Pointer to function:Line number:Callee function:Line number
-    >
+        std::string, // callee
+        std::vector<std::tuple<std::string, unsigned, std::string, unsigned>>> // func, argIdx, caller, callsiteLine
 > FunctionPtrArgMap;
 
 // For direct calls: module → caller → list of "callee:line"
@@ -61,9 +60,14 @@ class CallGraphPass {
         void RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName, unsigned Index, StringRef FuncName, unsigned);
         void RecordDynamicFuncPtrAssignment(StringRef ModuleName, StringRef InFunction,
             StringRef TargetFunc, StringRef AssignedTo, unsigned LineNumber);
-        void RecordFuncPtrArgument(StringRef ModuleName, StringRef CallerFunc,
-            StringRef PassedFunc, StringRef CalleeFunc,
-            unsigned ArgIndex, unsigned LineNumber);
+        void RecordFuncPtrArgument(
+                const std::string &ModuleName,
+                const std::string &CalleeName,
+                const std::string &FuncName,
+                const std::string &CallerName,
+                unsigned ArgIndex,
+                unsigned Line
+            );
         void RecordDirectCall(StringRef ModuleName, StringRef CallerFunc,
             StringRef CalleeFunc, unsigned Line);
         void RecordIndirectCall(StringRef ModuleName, StringRef CallerFunc,
@@ -71,6 +75,7 @@ class CallGraphPass {
 
         Function* resolveCalledFunction(Value *V);
         void CollectStaticIndirectCallCandidates(Module *M);
+        
     protected:
         const char * ID;
     public:
