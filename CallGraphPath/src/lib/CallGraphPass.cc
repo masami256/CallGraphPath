@@ -48,7 +48,7 @@ bool CallGraphPass::CollectInformation(Module *M) {
 
     CollectFunctionProtoTypes(M);
     CollectStaticFunctionPointerAssignments(M);
-    CollectStaticStructFunctionPointerAssignments(M);
+    CollectDynamicFunctionPointerAssignments(M);
     
     PrintFunctionPointerSettings(FunctionPointerSettings);
     return true;
@@ -175,59 +175,74 @@ void CallGraphPass::CollectStaticFunctionPointerAssignments(Module *M) {
     }
 }
 
+void CallGraphPass::CollectDynamicFunctionPointerAssignments(Module *M) {
+    // Iterate over all functions in the module
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
 
+        // Get the function name
+        std::string CallerName = F.getName().str();
 
-void CallGraphPass::CollectStaticStructFunctionPointerAssignments(Module *M) {
-    for (GlobalVariable &GV : M->globals()) {
-        if (!GV.hasInitializer()) continue;
+        // Iterate through all basic blocks in the function
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                // Look for store instructions, which could represent assignments to function pointers
+                if (auto *storeInst = dyn_cast<StoreInst>(&I)) {
+                    // Get the value being stored (this could be a function pointer)
+                    Value *storedVal = storeInst->getValueOperand();
 
-        Constant *Init = GV.getInitializer();
-        
-        // Check if the initializer is a ConstantStruct
-        if (auto *CS = dyn_cast<ConstantStruct>(Init)) {
-            for (unsigned i = 0; i < CS->getNumOperands(); ++i) {
-                Value *op = CS->getOperand(i);
-                unsigned Line = 0;
-                if (GV.hasMetadata()) {
-                    if (auto *dbg = GV.getMetadata("dbg")) {
-                        if (auto *DGV = dyn_cast<DIGlobalVariableExpression>(dbg)) {
-                            Line = DGV->getVariable()->getLine();
+                    // Check if the stored value is a function pointer
+                    if (auto *funcPtr = dyn_cast<Function>(storedVal)) {
+                        // Get line number information from the debug metadata
+                        unsigned Line = 0;
+                        if (DILocation *Loc = I.getDebugLoc()) {
+                            Line = Loc->getLine();
                         }
-                    }
-                }
 
-                // Case 1: direct function pointer
-                if (Function *F = dyn_cast<Function>(op)) {
-                    // Extract struct type name and offset from GlobalVariable type
-                    Type *ElemType = GV.getValueType(); // should be StructType*
-                    unsigned Offset = 0; // Calculate the offset
-                    std::string StructTypeName = "unknown"; // Default if StructTypeName is not found
-                    
-                    if (StructType *ST = dyn_cast<StructType>(ElemType)) {
-                        if (ST->hasName()) {
-                            StructTypeName = ST->getName().str();  // Get the name of the struct
-                        }
-                        Offset = i * 8;  // Assuming 8-byte function pointer size
+                        // Record the dynamic function pointer assignment
+                        errs() << "[debug] Found dynamic function pointer assignment: "
+                               << funcPtr->getName() << " in function " << CallerName
+                               << " at line " << Line << "\n";
+                               
+                        // Register the dynamic function pointer setting
+                        RecordFunctionPointerSetting(M->getName().str(), CallerName, "", funcPtr->getName().str(), Line, 0);
                     }
-
-                    // Register to StaticFPMap with offset
-                    RecordFunctionPointerSetting(M->getName().str(), GV.getName().str(), StructTypeName, F->getName().str(), Line, Offset);
                 }
             }
         }
     }
 }
 
-// Record the function pointer setting along with the offset in the struct
-void CallGraphPass::RecordFunctionPointerSetting(const std::string &ModName, const std::string &SetterName,
-    const std::string &StructTypeName, const std::string &FuncName, 
-    unsigned Line, unsigned Offset) {
-    std::string k = ModName + ":" + std::to_string(Line);
-    FunctionPointerSettingInfo setting = {ModName, SetterName, StructTypeName, FuncName, Line, Offset};
-    FunctionPointerSettings[k].push_back(setting);
+void CallGraphPass::RecordFunctionPointerSetting(
+    const std::string &ModName,
+    const std::string &SetterName,
+    const std::string &StructTypeName,
+    const std::string &FuncName,
+    unsigned Line,
+    unsigned Offset) {
 
-    // Log the function pointer assignment
-    errs() << "[debug] Found function pointer assignment: "
-            << SetterName << " in variable " << FuncName
-            << " in module " << ModName << " at line " << Line << "\n";
+    // Check if the function pointer has already been recorded for this module and line
+    if (ProcessedSettings.find({ModName, FuncName, Line, Offset}) != ProcessedSettings.end()) {
+        return;  // Skip if already processed
+    }
+
+    // Record the setting
+    FunctionPointerSettingInfo settingInfo;
+    settingInfo.ModName = ModName;
+    settingInfo.SetterName = SetterName;
+    settingInfo.StructTypeName = StructTypeName;
+    settingInfo.FuncName = FuncName;
+    settingInfo.Line = Line;
+    settingInfo.Offset = Offset;
+
+    // Insert the setting info into the appropriate map
+    FunctionPointerSettings[ModName + ":" + std::to_string(Line)].push_back(settingInfo);
+
+    // Add the setting to the processed set to avoid future duplication
+    ProcessedSettings.insert({ModName, FuncName, Line, Offset});
+
+    // Log the addition of the function pointer setting
+    // errs() << "[debug] Found function pointer setting: " << SetterName
+    //        << " in module " << ModName << " at line " << Line
+    //        << " for function " << FuncName << " with offset " << Offset << "\n";
 }

@@ -9,6 +9,10 @@ __attribute__((noinline)) static void bar(void) {
     printf("bar\n");
 }
 
+__attribute__((noinline)) static void baz(void) {
+    printf("baz\n");
+}
+
 struct inode_operations {
     void (*foo)(void);
     void (*bar)(void);
@@ -23,6 +27,8 @@ static struct inode_operations iops = {
     .bar = bar,
 };
 
+static void (*sfp)(void) = baz;
+
 __attribute__((noinline))  static void test_func(struct inode *inode) {
     printf("test_func\n");
     inode->i_op->foo();
@@ -30,11 +36,14 @@ __attribute__((noinline))  static void test_func(struct inode *inode) {
 }
 
 int main(int argc, char **argv) {
+    void (*fp)(void) = bar;
 
     struct inode i = {
         .i_op = &iops,
     };
 
     test_func(&i);
+    sfp();
+    fp();
     return 0;
 }

@@ -51,13 +51,15 @@ class CallGraphPass {
     private:
         ModuleFunctionMap ModuleFunctionMap;
         FunctionPointerSettings FunctionPointerSettings;
+        // Record the function pointer setting along with the offset in the struct
+        std::set<std::tuple<std::string, std::string, unsigned, unsigned>> ProcessedSettings;
 
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerAssignments(Module *M);
+        void CollectDynamicFunctionPointerAssignments(Module *M);
         void RecordFunctionPointerSetting(const std::string &ModName, const std::string &FuncPtrVarName,
             const std::string &StructTypeName, const std::string &FuncName, 
             unsigned Line, unsigned Offset);
-        void CollectStaticStructFunctionPointerAssignments(Module *M);
 
     protected:
         const char * ID;
