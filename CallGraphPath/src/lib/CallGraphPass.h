@@ -47,6 +47,18 @@ struct FunctionPointerSettingInfo {
 // FunctionPointerSettings: Stores all function pointer settings for a module.
 using FunctionPointerSettings = std::map<std::string, std::vector<FunctionPointerSettingInfo>>;
 
+// Structure to store information about function pointer calls
+struct FunctionPointerCallInfo {
+    std::string ModName;         // Module name where the function call occurs
+    std::string CallerFuncName;  // Name of the calling function
+    std::string CalleeFuncName;  // Name of the called function
+    unsigned Line;               // Line number where the function pointer is called
+    unsigned ArgIndex;           // Index number of argument parameter
+};
+
+// Map to store FunctionPointerCallInfo, with key as "ModuleName:LineNumber"
+using FunctionPointerCallMap = std::map<std::string, std::vector<FunctionPointerCallInfo>>;
+
 class CallGraphPass {
     private:
         ModuleFunctionMap ModuleFunctionMap;
@@ -54,12 +66,26 @@ class CallGraphPass {
         // Record the function pointer setting along with the offset in the struct
         std::set<std::tuple<std::string, std::string, unsigned, unsigned>> ProcessedSettings;
 
+        FunctionPointerCallMap FunctionPointerCallMap;
+
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerAssignments(Module *M);
-        void CollectDynamicFunctionPointerAssignments(Module *M);
-        void RecordFunctionPointerSetting(const std::string &ModName, const std::string &FuncPtrVarName,
-            const std::string &StructTypeName, const std::string &FuncName, 
-            unsigned Line, unsigned Offset);
+        void CollectCallingAddressTakenFunction(Module *M);
+
+        void RecordFunctionPointerSetting(
+            const std::string &ModName,
+            const std::string &SetterName,
+            const std::string &StructTypeName,
+            const std::string &FuncName,
+            unsigned Line,
+            unsigned Offset);
+
+        void RecordFunctionPointerCall(
+            const std::string &ModName, 
+            const std::string &CallerFuncName, 
+            const std::string &CalleeFuncName, 
+            unsigned Line,
+            unsigned ArgIndex);
 
     protected:
         const char * ID;

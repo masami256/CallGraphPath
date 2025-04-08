@@ -48,7 +48,7 @@ bool CallGraphPass::CollectInformation(Module *M) {
 
     CollectFunctionProtoTypes(M);
     CollectStaticFunctionPointerAssignments(M);
-    CollectDynamicFunctionPointerAssignments(M);
+    CollectCallingAddressTakenFunction(M);
     
     PrintFunctionPointerSettings(FunctionPointerSettings);
     return true;
@@ -175,43 +175,6 @@ void CallGraphPass::CollectStaticFunctionPointerAssignments(Module *M) {
     }
 }
 
-void CallGraphPass::CollectDynamicFunctionPointerAssignments(Module *M) {
-    // Iterate over all functions in the module
-    for (Function &F : *M) {
-        if (F.isDeclaration()) continue;
-
-        // Get the function name
-        std::string CallerName = F.getName().str();
-
-        // Iterate through all basic blocks in the function
-        for (BasicBlock &BB : F) {
-            for (Instruction &I : BB) {
-                // Look for store instructions, which could represent assignments to function pointers
-                if (auto *storeInst = dyn_cast<StoreInst>(&I)) {
-                    // Get the value being stored (this could be a function pointer)
-                    Value *storedVal = storeInst->getValueOperand();
-
-                    // Check if the stored value is a function pointer
-                    if (auto *funcPtr = dyn_cast<Function>(storedVal)) {
-                        // Get line number information from the debug metadata
-                        unsigned Line = 0;
-                        if (DILocation *Loc = I.getDebugLoc()) {
-                            Line = Loc->getLine();
-                        }
-
-                        // Record the dynamic function pointer assignment
-                        errs() << "[debug] Found dynamic function pointer assignment: "
-                               << funcPtr->getName() << " in function " << CallerName
-                               << " at line " << Line << "\n";
-                               
-                        // Register the dynamic function pointer setting
-                        RecordFunctionPointerSetting(M->getName().str(), CallerName, "", funcPtr->getName().str(), Line, 0);
-                    }
-                }
-            }
-        }
-    }
-}
 
 void CallGraphPass::RecordFunctionPointerSetting(
     const std::string &ModName,
@@ -235,14 +198,100 @@ void CallGraphPass::RecordFunctionPointerSetting(
     settingInfo.Line = Line;
     settingInfo.Offset = Offset;
 
-    // Insert the setting info into the appropriate map
+    // Insert the setting info into the appropriate map, grouped by module name and line
     FunctionPointerSettings[ModName + ":" + std::to_string(Line)].push_back(settingInfo);
 
     // Add the setting to the processed set to avoid future duplication
     ProcessedSettings.insert({ModName, FuncName, Line, Offset});
 
     // Log the addition of the function pointer setting
-    // errs() << "[debug] Found function pointer setting: " << SetterName
-    //        << " in module " << ModName << " at line " << Line
-    //        << " for function " << FuncName << " with offset " << Offset << "\n";
+    errs() << "[debug] Found function pointer setting: " << SetterName
+           << " in module " << ModName << " at line " << Line
+           << " for function " << FuncName << " with offset " << Offset << "\n";
+}
+
+void CallGraphPass::CollectCallingAddressTakenFunction(Module *M) {
+    std::string ModName = M->getName().str();
+
+    // Iterate over all functions in the module
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
+
+        // Check all instructions in each function
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                if (auto *call = dyn_cast<CallBase>(&I)) {
+                    Value *called = call->getCalledOperand();
+
+                    // Check if the called value is a function or a function pointer
+                    if (isa<Function>(called)) {
+                        Function *calledFunc = dyn_cast<Function>(called);
+                        // Direct function call (e.g., bar() in main)
+                        std::string CallerFuncName = F.getName().str();
+                        std::string CalleeFuncName = calledFunc->getName().str();  // Convert StringRef to string
+                        unsigned Line = 0;
+                        if (DILocation *Loc = I.getDebugLoc()) {
+                            Line = Loc->getLine();
+                        }
+
+                        // Loop through the arguments to record the index of the function pointer argument
+                        for (unsigned i = 0; i < call->arg_size(); ++i) {
+                            Value *Arg = call->getArgOperand(i);
+                            // If the argument is a function pointer, record it
+                            if (isa<Function>(Arg) || isa<PointerType>(Arg->getType())) {
+                                // Record direct function call with argument index
+                                RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, i);
+                            }
+                        }
+                    } else if (auto *callInst = dyn_cast<Instruction>(called)) {
+                        if (auto *load = dyn_cast<LoadInst>(callInst)) {
+                            Value *ptrVal = load->getPointerOperand();
+                            if (isa<Function>(ptrVal)) {
+                                Function *calledFunc = dyn_cast<Function>(ptrVal);
+                                std::string CallerFuncName = F.getName().str();
+                                std::string CalleeFuncName = calledFunc->getName().str();  // Convert StringRef to string
+                                unsigned Line = 0;
+                                if (DILocation *Loc = I.getDebugLoc()) {
+                                    Line = Loc->getLine();
+                                }
+
+                                // Loop through function arguments to find function pointer arguments
+                                for (unsigned i = 0; i < call->arg_size(); ++i) {
+                                    Value *Arg = call->getArgOperand(i);
+                                    if (Arg == called) {
+                                        // Record indirect function pointer call and its argument index
+                                        RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, i);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void CallGraphPass::RecordFunctionPointerCall(
+    const std::string &ModName, 
+    const std::string &CallerFuncName, 
+    const std::string &CalleeFuncName, 
+    unsigned Line,
+    unsigned ArgIndex) {
+
+    std::string key = ModName + ":" + std::to_string(Line) + ":" + std::to_string(ArgIndex);
+
+    // Create a FunctionPointerCallInfo object
+    FunctionPointerCallInfo callInfo{ModName, CallerFuncName, CalleeFuncName, Line, ArgIndex};
+
+    // Insert the call information into the map with the updated key
+    FunctionPointerCallMap[key].push_back(callInfo);
+
+    // Optionally log the function pointer call information
+    errs() << "[debug] Recorded function pointer call: " 
+           << "Module: " << ModName 
+           << ", Caller: " << CallerFuncName 
+           << ", Callee: " << CalleeFuncName 
+           << " at line: " << Line
+           << " with argument index: " << ArgIndex << "\n";
 }
