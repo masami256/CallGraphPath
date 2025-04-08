@@ -1,10 +1,10 @@
 #include <stdio.h>
 
-static void foo(void) {
+__attribute__((noinline)) static void foo(void) {
     printf("foo\n");
 }
 
-static void bar(void) {
+__attribute__((noinline)) static void bar(void) {
     printf("bar\n");
 }
 

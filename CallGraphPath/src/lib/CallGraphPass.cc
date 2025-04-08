@@ -48,9 +48,12 @@ bool CallGraphPass::CollectInformation(Module *M) {
 
     CollectFunctionProtoTypes(M);
     CollectStaticFunctionPointerAssignments(M);
+    CollectFunctionPointerArgumentPassing(M);
     CollectCallingAddressTakenFunction(M);
+    CollectDynamicFunctionPointerAssignments(M);
     
     PrintFunctionPointerSettings(FunctionPointerSettings);
+    PrintFunctionPointerCallMap(FunctionPointerCallMap);
     return true;
 }
 
@@ -213,57 +216,117 @@ void CallGraphPass::RecordFunctionPointerSetting(
 void CallGraphPass::CollectCallingAddressTakenFunction(Module *M) {
     std::string ModName = M->getName().str();
 
-    // Iterate over all functions in the module
     for (Function &F : *M) {
         if (F.isDeclaration()) continue;
 
-        // Check all instructions in each function
         for (BasicBlock &BB : F) {
             for (Instruction &I : BB) {
                 if (auto *call = dyn_cast<CallBase>(&I)) {
-                    Value *called = call->getCalledOperand();
+                    Value *calledValue = call->getCalledOperand()->stripPointerCasts();
 
-                    // Check if the called value is a function or a function pointer
-                    if (isa<Function>(called)) {
-                        Function *calledFunc = dyn_cast<Function>(called);
-                        // Direct function call (e.g., bar() in main)
-                        std::string CallerFuncName = F.getName().str();
-                        std::string CalleeFuncName = calledFunc->getName().str();  // Convert StringRef to string
-                        unsigned Line = 0;
-                        if (DILocation *Loc = I.getDebugLoc()) {
-                            Line = Loc->getLine();
+                    // Skip direct calls
+                    if (isa<Function>(calledValue) || isa<ConstantExpr>(calledValue)) {
+                        continue;
+                    }
+
+                    // Get line number
+                    unsigned Line = 0;
+                    if (DILocation *Loc = I.getDebugLoc()) {
+                        Line = Loc->getLine();
+                    }
+
+                    std::string CallerFuncName = F.getName().str();
+                    std::string CalleeFuncName = "indirect";
+
+                    // Case 1: Called value is directly an argument
+                    for (unsigned i = 0; i < F.arg_size(); ++i) {
+                        Argument &arg = *(F.arg_begin() + i);
+                        if (&arg == calledValue) {
+                            // Directly using argument as function pointer
+                            RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, i);
+                            goto done; // skip to next instruction
                         }
+                    }
 
-                        // Loop through the arguments to record the index of the function pointer argument
-                        for (unsigned i = 0; i < call->arg_size(); ++i) {
-                            Value *Arg = call->getArgOperand(i);
-                            // If the argument is a function pointer, record it
-                            if (isa<Function>(Arg) || isa<PointerType>(Arg->getType())) {
-                                // Record direct function call with argument index
-                                RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, i);
-                            }
-                        }
-                    } else if (auto *callInst = dyn_cast<Instruction>(called)) {
-                        if (auto *load = dyn_cast<LoadInst>(callInst)) {
-                            Value *ptrVal = load->getPointerOperand();
-                            if (isa<Function>(ptrVal)) {
-                                Function *calledFunc = dyn_cast<Function>(ptrVal);
-                                std::string CallerFuncName = F.getName().str();
-                                std::string CalleeFuncName = calledFunc->getName().str();  // Convert StringRef to string
-                                unsigned Line = 0;
-                                if (DILocation *Loc = I.getDebugLoc()) {
-                                    Line = Loc->getLine();
-                                }
+                    // Case 2: Called value is loaded from memory (possibly from a function pointer argument)
+                    if (auto *loadInst = dyn_cast<LoadInst>(calledValue)) {
+                        Value *loadedFrom = loadInst->getPointerOperand()->stripPointerCasts();
 
-                                // Loop through function arguments to find function pointer arguments
-                                for (unsigned i = 0; i < call->arg_size(); ++i) {
-                                    Value *Arg = call->getArgOperand(i);
-                                    if (Arg == called) {
-                                        // Record indirect function pointer call and its argument index
+                        for (User *U : loadedFrom->users()) {
+                            if (auto *storeInst = dyn_cast<StoreInst>(U)) {
+                                Value *storedVal = storeInst->getValueOperand()->stripPointerCasts();
+
+                                for (unsigned i = 0; i < F.arg_size(); ++i) {
+                                    Argument &arg = *(F.arg_begin() + i);
+                                    if (&arg == storedVal) {
+                                        // Indirect call via function pointer argument stored in local variable
                                         RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, i);
+                                        goto done;
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Optional: fallback for unknown indirect call
+                    RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, 0);
+
+                done:
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+void CallGraphPass::CollectDynamicFunctionPointerAssignments(Module *M) {
+    std::string ModName = M->getName().str();
+
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
+
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                if (auto *store = dyn_cast<StoreInst>(&I)) {
+                    Value *val = store->getValueOperand()->stripPointerCasts();
+                    if (Function *Fptr = dyn_cast<Function>(val)) {
+                        unsigned Line = 0;
+                        if (DILocation *Loc = I.getDebugLoc())
+                            Line = Loc->getLine();
+
+                        std::string Setter = F.getName().str();
+                        RecordFunctionPointerSetting(ModName, Setter, "", Fptr->getName().str(), Line, 0);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void CallGraphPass::CollectFunctionPointerArgumentPassing(Module *M) {
+    std::string ModName = M->getName().str();
+
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
+
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                if (auto *call = dyn_cast<CallBase>(&I)) {
+                    Function *calledFunc = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+                    if (!calledFunc) continue;
+
+                    for (unsigned i = 0; i < call->arg_size(); ++i) {
+                        Value *arg = call->getArgOperand(i)->stripPointerCasts();
+                        if (Function *passedFunc = dyn_cast<Function>(arg)) {
+                            unsigned Line = 0;
+                            if (DILocation *Loc = I.getDebugLoc())
+                                Line = Loc->getLine();
+
+                            std::string Caller = F.getName().str();
+                            std::string Callee = passedFunc->getName().str();
+
+                            // Record the function pointer call via argument
+                            RecordFunctionPointerCall(ModName, Caller, Callee, Line, i);
                         }
                     }
                 }

@@ -71,6 +71,8 @@ class CallGraphPass {
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerAssignments(Module *M);
         void CollectCallingAddressTakenFunction(Module *M);
+        void CollectDynamicFunctionPointerAssignments(Module *M);
+        void CollectFunctionPointerArgumentPassing(Module *M);
 
         void RecordFunctionPointerSetting(
             const std::string &ModName,

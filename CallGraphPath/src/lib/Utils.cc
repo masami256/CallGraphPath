@@ -42,3 +42,23 @@ void PrintFunctionPointerSettings(const FunctionPointerSettings &settings) {
     }
     errs() << "==== Dump FunctionPointerSettings data end ====\n";
 }
+
+void PrintFunctionPointerCallMap(const FunctionPointerCallMap &CallMap) {
+    errs() << "==== Dump FunctionPointerCallMap data ====\n";
+
+    for (const auto &entry : CallMap) {
+        const std::string &key = entry.first;
+        const std::vector<FunctionPointerCallInfo> &calls = entry.second;
+
+        errs() << "[debug] Function pointer calls for " << key << ":\n";
+        for (const auto &info : calls) {
+            errs() << "  Module: " << info.ModName << "\n"
+                   << "  Caller function: " << info.CallerFuncName << "\n"
+                   << "  Callee function: " << info.CalleeFuncName << "\n"
+                   << "  Line: " << info.Line << "\n"
+                   << "  Argument index: " << info.ArgIndex << "\n";
+        }
+    }
+
+    errs() << "==== Dump FunctionPointerCallMap data end ====\n";
+}
