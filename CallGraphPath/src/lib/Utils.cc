@@ -1,238 +1,44 @@
 #include "Utils.h"
 #include <iostream>
 
-void PrintFuncPtrArgumentMap(FunctionPtrArgMap &FuncPtrArgMap) {
-    std::cout << "==== Function Pointer Argument Map ====" << std::endl;
-
-    for (const auto &modEntry : FuncPtrArgMap) {
-        const std::string &modName = modEntry.first;
-        const auto &funcMap = modEntry.second;
-
-        std::cout << "Module: " << modName << std::endl;
-
-        for (const auto &funcEntry : funcMap) {
-            const std::string &caller = funcEntry.first;
-            const auto &entries = funcEntry.second;
-
-            std::cout << "  Caller Function: " << caller << std::endl;
-            for (const auto &entry : entries) {
-                const std::string &funcName = std::get<0>(entry);
-                unsigned argIndex = std::get<1>(entry);
-                const std::string &caller = std::get<2>(entry);
-                unsigned callLine = std::get<3>(entry);
-                
-                std::cout << "    " << funcName << ":" << argIndex << ":" << caller << ":" << callLine << std::endl;
-            }
-        }
-    }
-
-    std::cout << "==== End of Map ====" << std::endl;
-}
-
-void PrintDynamicFunctionPointerMap(DynamicFunctionPointerMap &DynamicFPMap) {
-    std::cout << "==== Dynamic Function Pointer Map ====" << std::endl;
-
-    for (const auto &modEntry : DynamicFPMap) {
-        const std::string &modName = modEntry.first;
-        const auto &funcMap = modEntry.second;
-
-        std::cout << "Module: " << modName << std::endl;
-
-        for (const auto &funcEntry : funcMap) {
-            const std::string &funcName = funcEntry.first;
-            const std::set<std::string> &entries = funcEntry.second;
-
-            std::cout << "  Function: " << funcName << std::endl;
-
-            for (const std::string &entry : entries) {
-                std::cout << "    " << entry << std::endl;
-            }
-        }
-
-        std::cout << std::endl;
-    }
-
-    std::cout << "==== End of Map ====" << std::endl;
-}
-
-void PrintModuleFunctionMap(ModuleFunctionMap &ModuleFunctionMap) {
-    std::cout << "=== ModuleFunctionMap Debug Dump ===" << std::endl;
-
-    // Iterate over each module
-    for (const auto &entry : ModuleFunctionMap) {
-        const std::string &moduleName = entry.first;
-        const std::vector<std::string> &functions = entry.second;
-
-        std::cout << "Module: " << moduleName << std::endl;
-
-        // Iterate over function prototype strings
-        for (const std::string &proto : functions) {
-            std::cout << "  [" << proto << "]" << std::endl;
-        }
-
-        std::cout << std::endl;
-    }
-
-    std::cout << "=== End of Dump ===" << std::endl;
-}
-
-void PrintStaticFunctionPointerMap(StaticFunctionPointerMap &StaticFPMap) {
-    std::cout << "==== Static Function Pointer Map ====" << std::endl;
-
-    // Iterate over struct types
-    for (const auto &typeEntry : StaticFPMap) {
-        const std::string &structType = typeEntry.first;
-        const auto &instanceMap = typeEntry.second;
-
-        std::cout << "Struct Type: " << structType << std::endl;
-
-        // Iterate over each global variable (instance of the struct)
-        for (const auto &varEntry : instanceMap) {
-            const std::string &varName = varEntry.first;
-            const std::vector<std::string> &entries = varEntry.second;
-
-            std::cout << "  Variable: " << varName << std::endl;
-
-            // Show index:function mappings
-            for (const std::string &entry : entries) {
-                std::cout << "    " << entry << std::endl;
-            }
-        }
-
-        std::cout << std::endl;
-    }
-
-    std::cout << "==== End of Map ====" << std::endl;
-}
-
-void PrintCallGraph(DirectCallMap &DirectCallMap, IndirectCallMap &IndirectCallMap, bool verbose) {
-    std::cout << "==== Direct Call Graph ====" << std::endl;
-
-    for (const auto &modEntry : DirectCallMap) {
-        const std::string &modName = modEntry.first;
-        const auto &funcMap = modEntry.second;
-
-        for (const auto &funcEntry : funcMap) {
-            const std::string &caller = funcEntry.first;
-            const auto &callees = funcEntry.second;
-
-            for (const std::string &entry : callees) {
-                // entry format: callee:line
-                size_t sep = entry.find_last_of(':');
-                std::string callee = entry.substr(0, sep);
-                std::string line = entry.substr(sep + 1);
-
-                std::cout << modName << ": " << caller << " -> " << callee << " [line " << line << "]" << std::endl;
-            }
-        }
-    }
-
-    std::cout << std::endl << "==== Indirect Call Graph ====" << std::endl;
-
-    for (const auto &modEntry : IndirectCallMap) {
-        const std::string &modName = modEntry.first;
-        const auto &funcMap = modEntry.second;
-
-        for (const auto &funcEntry : funcMap) {
-            const std::string &caller = funcEntry.first;
-            const auto &entries = funcEntry.second;
-
-            for (const std::string &entry : entries) {
-                // entry format: calledExpr:line
-                size_t sep = entry.find_last_of(':');
-                std::string expr = entry.substr(0, sep);
-                std::string line = entry.substr(sep + 1);
-
-                std::cout << modName << ": " << caller << " -> [indirect] [line " << line << "]" << std::endl;
-
-                if (verbose) {
-                    std::cout << "    IR: " << expr << std::endl;
+void PrintModuleFunctionMap(const ModuleFunctionMap &ModuleFunctionMap, const std::string &ModName) {
+    // Debugging log to confirm the collected function prototypes for the specific module
+    if (ModuleFunctionMap.find(ModName) != ModuleFunctionMap.end()) {
+        for (const auto &funcEntry : ModuleFunctionMap.at(ModName)) {
+            errs() << "[debug] Collected function prototypes for module: " << ModName << "\n";
+            errs() << "Function: " << funcEntry.first << "\n";
+            for (const auto &proto : funcEntry.second) {
+                errs() << "  Return Type: " << std::get<0>(proto) << "\n";
+                errs() << "  Arguments: ";
+                for (const auto &arg : std::get<1>(proto)) {
+                    errs() << arg << " ";
                 }
+                errs() << "\n  Line: " << std::get<2>(proto) << "\n";
             }
         }
+    } else {
+        errs() << "[debug] No function prototypes found for module: " << ModName << "\n";
     }
-
-    std::cout << "==== End of Call Graph ====" << std::endl;
 }
 
-void PrintResolvedIndirectCalls(const IndirectCallCandidates &Map) {
-    std::cout << "==== Resolved Indirect Calls ====" << std::endl;
-    // std::cout << "[debug] Total modules: " << Map.size() << std::endl;
-    // std::cout << "[debug] address of Map = " << &Map << std::endl;
+// // Function to print the collected function pointer settings for a given module
+// Example of logging the contents of FunctionPointerSettings
+void PrintFunctionPointerSettings(const FunctionPointerSettings &settings) {
+    errs() << "==== Dump FunctionPointerSettings data ====\n";
+    for (const auto &entry : settings) {
+        const std::string &key = entry.first;  // Key is the module name + line number
+        const std::vector<FunctionPointerSettingInfo> &functionSettings = entry.second;
 
-    for (const auto &modEntry : Map) {
-        const std::string &mod = modEntry.first;
-        // std::cout << "[debug] Module: " << mod << ", functions: " << modEntry.second.size() << std::endl;
-
-        for (const auto &funcEntry : modEntry.second) {
-            const std::string &caller = funcEntry.first;
-            
-            for (const auto &lineEntry : funcEntry.second) {
-                unsigned line = lineEntry.first;
-                const auto &targets = lineEntry.second;
-                std::cout << "[debug] Module: " << mod 
-                    << ", Caller: " << caller 
-                    << ", Line: " << line 
-                    << ", #targets: " << targets.size() << std::endl;
-                    
-                std::cout << "Module: [" << mod << "], Caller: [" << caller << "], Line: " << line << std::endl;
-
-                // std::cout << "[debug] line: " << line << ", #targets: " << targets.size() << std::endl;
-
-                std::cout << mod << ": " << caller << " [line " << line << "] -> ";
-                for (const auto &target : targets) {
-                    std::cout << target << " ";
-                }
-                std::cout << std::endl;
-            }
+        errs() << "[debug] Function pointer settings for " << key << ":\n";
+        
+        // Iterate through each setting in the vector
+        for (const auto &setting : functionSettings) {
+            errs() << "  Function pointer variable: " << setting.SetterName << "\n";
+            errs() << "  Struct type (if applicable): " << setting.StructTypeName << "\n";
+            errs() << "  Function name: " << setting.FuncName << "\n";
+            errs() << "  Line: " << setting.Line << "\n";
+            errs() << "  Offset: " << setting.Offset << "\n";
         }
     }
-    std::cout << "==== End of Resolved Indirect Calls ====" << std::endl;
+    errs() << "==== Dump FunctionPointerSettings data end ====\n";
 }
-
-void DumpEntireIndirectCallCandidates(const IndirectCallCandidates &Map) {
-    std::cout << "==== Full Dump: IndirectCallCandidates ====" << std::endl;
-    for (const auto &modEntry : Map) {
-        std::cout << "Module: [" << modEntry.first << "]" << std::endl;
-        for (const auto &funcEntry : modEntry.second) {
-            std::cout << "  Function: [" << funcEntry.first << "]" << std::endl;
-            for (const auto &lineEntry : funcEntry.second) {
-                std::cout << "    Line: " << lineEntry.first << " -> ";
-                for (const auto &target : lineEntry.second) {
-                    std::cout << "[" << target << "] ";
-                }
-                std::cout << std::endl;
-            }
-        }
-    }
-    std::cout << "==== End Dump ====" << std::endl;
-}
-
-
-void PrintFunctionPtrArgMap(const FunctionPtrArgMap &Map) {
-    std::cout << "==== Function Pointer Argument Map ====" << std::endl;
-
-    for (const auto &modEntry : Map) {
-        const std::string &module = modEntry.first;
-        std::cout << "Module: " << module << std::endl;
-
-        for (const auto &funcEntry : modEntry.second) {
-            const std::string &callee = funcEntry.first;
-            std::cout << "  Function: " << callee << std::endl;
-
-            for (const auto &tuple : funcEntry.second) {
-                const std::string &funcName = std::get<0>(tuple);
-                unsigned argIdx = std::get<1>(tuple);
-                const std::string &caller = std::get<2>(tuple);
-                unsigned line = std::get<3>(tuple);
-
-                std::cout << "    " << funcName << ":" << argIdx << ":" << caller << ":" << line << std::endl;
-            }
-        }
-    }
-
-    std::cout << "==== End of Map ====" << std::endl;
-}
-
-
-

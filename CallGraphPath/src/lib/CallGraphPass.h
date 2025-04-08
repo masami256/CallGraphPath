@@ -7,75 +7,58 @@
 
 using namespace llvm;
 
-// Map to store: module name -> list of function prototype strings
-typedef std::map<std::string, std::vector<std::string>> ModuleFunctionMap;
+// ModuleFunctionMap is a map where:
+// - The key is the module name (string) (e.g., "my_module.bc").
+// - The value is another map that associates function names (string) (e.g., "main", "foo") 
+//   with a vector of tuples.
+// Each tuple in the vector represents the function prototype and contains:
+// - std::string: the return type of the function (e.g., "i32" for integer, "void" for functions with no return).
+// - std::vector<std::string>: a list of argument types for the function (e.g., ["i32", "i8*"] for a function taking an integer and a pointer).
+// - std::string: the source line where the function is defined (e.g., "10" for line 10 in the source code).
+// Example:
+// Given the following function prototype in a module:
 
-typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> StaticFunctionPointerMap;
+// void bar(i32 x, i8* ptr) defined on line 10 of "my_module.bc":
+// {
+//   "my_module.bc" -> {
+//     "bar" -> {
+//       ("void", ["i32", "i8*"], "10")
+//     }
+//   }
+// }
+// This means that the module "my_module.bc" has a function "bar" with a return type of "void",
+// two arguments: an integer ("i32") and a pointer to a character ("i8*"), and it is defined on line 10 of the source code.
+using ModuleFunctionMap = std::map<std::string, 
+    std::map<std::string, 
+    std::vector<std::tuple<std::string, std::vector<std::string>, 
+    std::string>>>>;
 
-typedef std::map<
-    std::string, // Module Name（Module->getName()）
-    std::map<
-        std::string,               // Function name which the function pointer is assigned to
-        std::set<std::string>  // String of "Callee:AssignedTo:Line"
-    >
-> DynamicFunctionPointerMap;
 
-typedef std::map<
-    std::string, // module
-    std::map<
-        std::string, // callee
-        std::vector<std::tuple<std::string, unsigned, std::string, unsigned>>> // func, argIdx, caller, callsiteLine
-> FunctionPtrArgMap;
+// FunctionPointerSettingInfo: Stores function pointer setting information with an offset
+struct FunctionPointerSettingInfo {
+    std::string ModName;          // Module name
+    std::string SetterName;       // The name of the function or global variable where the pointer is set
+    std::string StructTypeName;   // Struct type name for struct function pointers
+    std::string FuncName;         // The function being pointed to
+    unsigned Line;                // The line number where the pointer is set
+    unsigned Offset;              // The offset of the function pointer in the struct
+};
 
-// For direct calls: module → caller → list of "callee:line"
-typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> DirectCallMap;
-
-// For indirect calls: module → caller → list of "called_value(IR text):line"
-typedef std::map<std::string, std::map<std::string, std::vector<std::string>>> IndirectCallMap;
-
-using IndirectCallCandidates = std::map<
-    std::string,                         // Module
-    std::map<std::string,               // Function name
-        std::map<unsigned, std::set<std::string>>>>;  // Line -> Set of function names
-
+// FunctionPointerSettings: Stores all function pointer settings for a module.
+using FunctionPointerSettings = std::map<std::string, std::vector<FunctionPointerSettingInfo>>;
 
 class CallGraphPass {
     private:
-        ModuleFunctionMap ModuleFuncMap;
-        StaticFunctionPointerMap StaticFPMap;
-        DynamicFunctionPointerMap DynamicFPMap;
-        FunctionPtrArgMap FuncPtrArgMap;
-        DirectCallMap DirectCallMap;
-        IndirectCallMap IndirectCallMap;
-        IndirectCallCandidates IndirectCallCandidates;
-        
+        ModuleFunctionMap ModuleFunctionMap;
+        FunctionPointerSettings FunctionPointerSettings;
+
         void CollectFunctionProtoTypes(Module *M);
-        void CollectStaticFunctionPointerInit(Module *M);
-        void CollectDynamicFunctionPointerInit(Module *M);
-        void CollectGlobalFunctionPointerInit(Module *M);
-        void CollectFunctionPointerArguments(Module *M);
-        void CollectCallInstructions(Module *M);
-        void CollectIndirectCallCandidates(Module *M);
+        void CollectStaticFunctionPointerAssignments(Module *M);
+        void RecordFunctionPointerSetting(const std::string &ModName, const std::string &FuncPtrVarName,
+            const std::string &StructTypeName, const std::string &FuncName, 
+            unsigned Line, unsigned Offset);
+        void CollectStaticStructFunctionPointerAssignments(Module *M);
 
-        void RecordStaticFuncPtrInit(StringRef StructTypeName, StringRef VarName, unsigned Index, StringRef FuncName, unsigned);
-        void RecordDynamicFuncPtrAssignment(StringRef ModuleName, StringRef InFunction,
-            StringRef TargetFunc, StringRef AssignedTo, unsigned LineNumber);
-        void RecordFuncPtrArgument(
-                const std::string &ModuleName,
-                const std::string &CalleeName,
-                const std::string &FuncName,
-                const std::string &CallerName,
-                unsigned ArgIndex,
-                unsigned Line
-            );
-        void RecordDirectCall(StringRef ModuleName, StringRef CallerFunc,
-            StringRef CalleeFunc, unsigned Line);
-        void RecordIndirectCall(StringRef ModuleName, StringRef CallerFunc,
-            StringRef CalledValueStr, unsigned Line);
-
-        Function* resolveCalledFunction(Value *V);
-        void CollectStaticIndirectCallCandidates(Module *M);
-        
     protected:
         const char * ID;
     public:
