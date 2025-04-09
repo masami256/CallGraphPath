@@ -52,6 +52,7 @@ bool CallGraphPass::CollectInformation(Module *M) {
     CollectCallingAddressTakenFunction(M);
     CollectDynamicFunctionPointerAssignments(M);
     
+    PrintModuleFunctionMap(ModuleFunctionMap, M->getName().str());
     PrintFunctionPointerSettings(FunctionPointerSettings);
     PrintFunctionPointerCallMap(FunctionPointerCallMap);
     return true;
