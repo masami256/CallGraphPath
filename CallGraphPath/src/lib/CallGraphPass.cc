@@ -51,7 +51,8 @@ bool CallGraphPass::CollectInformation(Module *M) {
     CollectFunctionPointerArgumentPassing(M);
     CollectCallingAddressTakenFunction(M);
     CollectDynamicFunctionPointerAssignments(M);
-    
+    CollectDirectCalls(M);
+
     PrintModuleFunctionMap(ModuleFunctionMap, M->getName().str());
     PrintFunctionPointerSettings(FunctionPointerSettings);
     PrintFunctionPointerCallMap(FunctionPointerCalls);
@@ -64,7 +65,6 @@ bool CallGraphPass::IdentifyTargets(Module *M) {
     std::string ModName = M->getName().str();
     errs() << "Identifying targets in module: " << ModName << "\n";
 
-    AnalyzeDirectCalls(M);
     AnalyzeIndirectCalls();
     ResolveIndirectCalls();
     AnalyzeStaticFPCallSites();
@@ -313,7 +313,7 @@ void CallGraphPass::CollectFunctionPointerArgumentPassing(Module *M) {
     }
 }
 
-void CallGraphPass::AnalyzeDirectCalls(Module *M) {
+void CallGraphPass::CollectDirectCalls(Module *M) {
     std::string ModName = M->getName().str();
 
     for (Function &F : *M) {

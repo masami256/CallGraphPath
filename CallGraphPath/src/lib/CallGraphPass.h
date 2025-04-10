@@ -105,7 +105,7 @@ class CallGraphPass {
         void CollectCallingAddressTakenFunction(Module *M);
         void CollectDynamicFunctionPointerAssignments(Module *M);
         void CollectFunctionPointerArgumentPassing(Module *M);
-        void AnalyzeDirectCalls(Module *M);
+        void CollectDirectCalls(Module *M);
         void AnalyzeIndirectCalls();
         void ResolveIndirectCalls();
         void AnalyzeStaticFPCallSites();
