@@ -65,9 +65,10 @@ bool CallGraphPass::IdentifyTargets(Module *M) {
     errs() << "Identifying targets in module: " << ModName << "\n";
 
     AnalyzeDirectCalls(M);
-
-    PrintCallGraph(CallGraph);
+    AnalyzeIndirectCalls();
     
+    PrintCallGraph(CallGraph);
+
     return true;
 }
 
@@ -362,6 +363,24 @@ void CallGraphPass::AnalyzeDirectCalls(Module *M) {
                     RecordCallGraphEdge(ModName, CallerFunc, CalleeFunc, Line, false);
                 }
             }
+        }
+    }
+}
+
+void CallGraphPass::AnalyzeIndirectCalls() {
+    for (const auto &entry : FunctionPointerUses) {
+        const std::string &key = entry.first;
+        const std::vector<FunctionPointerUseInfo> &uses = entry.second;
+
+        for (const auto &use : uses) {
+            // Create a call edge with "indirect" as the callee function
+            RecordCallGraphEdge(
+                use.ModName,
+                use.CallerFuncName,
+                "indirect",  // Placeholder
+                use.Line,
+                true         // IsIndirect
+            );
         }
     }
 }

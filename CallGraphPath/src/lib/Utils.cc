@@ -87,7 +87,7 @@ void PrintCallGraph(const ModuleCallGraph &CallGraph) {
 
         errs() << "[debug] Call edges for module: " << ModName << "\n";
         for (const auto &edge : edges) {
-            errs() << "  Caller function: " << edge.CallerFunction << "\n"
+            errs() << "----------\n" <<  "Caller function: " << edge.CallerFunction << "\n"
                    << "  Callee function: " << edge.CalleeFunction << "\n"
                    << "  Line: " << edge.Line << "\n"
                    << "  Type: " << (edge.IsIndirect ? "indirect" : "direct") << "\n";
