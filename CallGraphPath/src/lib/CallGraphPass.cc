@@ -66,6 +66,7 @@ bool CallGraphPass::IdentifyTargets(Module *M) {
 
     AnalyzeDirectCalls(M);
     AnalyzeIndirectCalls();
+    ResolveIndirectCalls();
 
     PrintCallGraph(CallGraph);
 
@@ -388,6 +389,56 @@ void CallGraphPass::AnalyzeIndirectCalls() {
         }
     }
 }
+
+void CallGraphPass::ResolveIndirectCalls() {
+    for (auto &modEntry : CallGraph) {
+        std::string ModName = modEntry.first;
+        std::vector<CallEdgeInfo> &edges = modEntry.second;
+
+        for (auto &edge : edges) {
+            // Only process unresolved indirect calls
+            if (!edge.IsIndirect || edge.CalleeFunction != "indirect")
+                continue;
+
+            std::string bestMatch = "";
+
+            // Find corresponding FunctionPointerUseInfo
+            for (const auto &useEntry : FunctionPointerUses) {
+                const std::vector<FunctionPointerUseInfo> &uses = useEntry.second;
+                for (const auto &use : uses) {
+                    if (use.ModName != edge.CallerModule ||
+                        use.CallerFuncName != edge.CallerFunction ||
+                        use.Line != edge.Line)
+                        continue;
+
+                    // Match this use against FunctionPointerCallMap
+                    for (const auto &callEntry : FunctionPointerCalls) {
+                        const std::vector<FunctionPointerCallInfo> &calls = callEntry.second;
+                        for (const auto &call : calls) {
+                            // Match on module and argument index
+                            if (call.ModName == use.ModName &&
+                                call.ArgIndex == use.ArgIndex) {
+                                bestMatch = call.CalleeFuncName;
+                                break;
+                            }
+                        }
+                        if (!bestMatch.empty()) break;
+                    }
+                }
+                if (!bestMatch.empty()) break;
+            }
+
+            // If match found, update the CalleeFunction
+            if (!bestMatch.empty()) {
+                errs() << "[debug] Resolved indirect call at "
+                       << edge.CallerFunction << ":" << edge.Line
+                       << " to " << bestMatch << "\n";
+                edge.CalleeFunction = bestMatch;
+            }
+        }
+    }
+}
+
 
 void CallGraphPass::RecordFunctionPointerCall(
     const std::string &ModName, 

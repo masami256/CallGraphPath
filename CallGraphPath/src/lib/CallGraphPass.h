@@ -102,6 +102,7 @@ class CallGraphPass {
         void CollectFunctionPointerArgumentPassing(Module *M);
         void AnalyzeDirectCalls(Module *M);
         void AnalyzeIndirectCalls();
+        void ResolveIndirectCalls();
 
         void RecordFunctionPointerSetting(
             const std::string &ModName,
