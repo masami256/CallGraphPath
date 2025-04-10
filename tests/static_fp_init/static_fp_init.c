@@ -1,15 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-__attribute__((noinline)) static void foo(void) {
+__attribute__((noinline)) static void myfoo(void) {
     printf("foo\n");
 }
 
-__attribute__((noinline)) static void bar(void) {
+__attribute__((noinline)) static void mybar(void) {
     printf("bar\n");
 }
 
-__attribute__((noinline)) static void baz(void) {
+__attribute__((noinline)) static void mybaz(void) {
     printf("baz\n");
 }
 
@@ -23,11 +23,11 @@ struct inode {
 };
 
 static struct inode_operations iops = {
-    .foo = foo,
-    .bar = bar,
+    .foo = myfoo,
+    .bar = mybar,
 };
 
-static void (*sfp)(void) = baz;
+static void (*sfp)(void) = mybaz;
 
 __attribute__((noinline))  static void test_func(struct inode *inode) {
     printf("test_func\n");
@@ -36,7 +36,7 @@ __attribute__((noinline))  static void test_func(struct inode *inode) {
 }
 
 int main(int argc, char **argv) {
-    void (*fp)(void) = bar;
+    void (*fp)(void) = mybar;
 
     struct inode i = {
         .i_op = &iops,

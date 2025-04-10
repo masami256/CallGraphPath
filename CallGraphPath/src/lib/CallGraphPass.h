@@ -37,6 +37,7 @@ using ModuleFunctionMap = std::map<std::string,
 // FunctionPointerSettingInfo: Stores function pointer setting information with an offset
 struct FunctionPointerSettingInfo {
     std::string ModName;          // Module name
+    std::string VarName;          // The Variable name
     std::string SetterName;       // The name of the function or global variable where the pointer is set
     std::string StructTypeName;   // Struct type name for struct function pointers
     std::string FuncName;         // The function being pointed to
@@ -72,13 +73,17 @@ using FunctionPointerUseMap = std::map<std::string, std::vector<FunctionPointerU
 
 
 // Call-edge
+// Call-edge structure
 struct CallEdgeInfo {
-    std::string CallerModule;
-    std::string CallerFunction;
-    std::string CalleeFunction;
-    unsigned Line;
-    bool IsIndirect;
+    std::string CallerModule;     // Module name where the call occurs
+    std::string CallerFunction;   // Function from which the call is made
+    std::string CalleeFunction;   // Function being called (can be "indirect")
+    unsigned Line;                // Source line of the call
+    bool IsIndirect;              // True if the call is indirect
+    std::string VarName;          // Name of the variable used in the call (only for indirect calls)
+    unsigned Offset;              // Offset within struct if applicable (added for matching)
 };
+
 
 // Callgraph
 using ModuleCallGraph = std::map<std::string, std::vector<CallEdgeInfo>>;
@@ -103,6 +108,8 @@ class CallGraphPass {
         void AnalyzeDirectCalls(Module *M);
         void AnalyzeIndirectCalls();
         void ResolveIndirectCalls();
+        void AnalyzeStaticFPCallSites();
+        void AnalyzeStaticGlobalFPCalls();
 
         void RecordFunctionPointerSetting(
             const std::string &ModName,
@@ -131,8 +138,18 @@ class CallGraphPass {
             const std::string &CallerFunc,
             const std::string &CalleeFunc,
             unsigned Line,
-            bool IsIndirect);
+            bool IsIndirect,
+            const std::string &VarName = "",
+            unsigned Offset = 0);
 
+        unsigned getLineNumber(const Instruction *I) {
+            if (const DebugLoc &DL = I->getDebugLoc()) {
+                return DL.getLine();
+            }
+            return 0;
+        }
+
+            
     protected:
         const char * ID;
     public:

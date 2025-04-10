@@ -67,6 +67,8 @@ bool CallGraphPass::IdentifyTargets(Module *M) {
     AnalyzeDirectCalls(M);
     AnalyzeIndirectCalls();
     ResolveIndirectCalls();
+    AnalyzeStaticFPCallSites();
+    AnalyzeStaticGlobalFPCalls();
 
     PrintCallGraph(CallGraph);
 
@@ -115,74 +117,56 @@ void CallGraphPass::CollectFunctionProtoTypes(Module *M) {
 }
 
 void CallGraphPass::CollectStaticFunctionPointerAssignments(Module *M) {
+    std::string ModName = M->getName().str();
+
     for (GlobalVariable &GV : M->globals()) {
+        // Skip if the global has no initializer
         if (!GV.hasInitializer()) continue;
 
         Constant *Init = GV.getInitializer();
-        
-        // Case 1: Direct function pointer assignments (e.g., fp = foo;)
-        if (auto *funcPtr = dyn_cast<Function>(Init)) {
-            unsigned Line = 0;
-            if (GV.hasMetadata()) {
-                if (auto *dbg = GV.getMetadata("dbg")) {
-                    if (auto *DGV = dyn_cast<DIGlobalVariableExpression>(dbg)) {
-                        Line = DGV->getVariable()->getLine();
-                    }
-                }
-            }
 
-            // Register the function pointer assignment for direct function pointers
-            RecordFunctionPointerSetting(M->getName().str(), GV.getName().str(), "", funcPtr->getName().str(), Line, 0);
-        }
-
-        // Case 2: Handle function pointer assignments inside structures (e.g., struct with function pointers)
+        // Case 1: Global is a struct with function pointer fields
         if (auto *CS = dyn_cast<ConstantStruct>(Init)) {
+            const StructType *ST = dyn_cast<StructType>(GV.getValueType());
+            if (!ST) continue;
+
+            std::string StructTypeName;
+            if (ST->hasName())
+                StructTypeName = ST->getName().str();
+
             for (unsigned i = 0; i < CS->getNumOperands(); ++i) {
                 Value *op = CS->getOperand(i);
-                unsigned Line = 0;
-                if (GV.hasMetadata()) {
-                    if (auto *dbg = GV.getMetadata("dbg")) {
-                        if (auto *DGV = dyn_cast<DIGlobalVariableExpression>(dbg)) {
-                            Line = DGV->getVariable()->getLine();
-                        }
-                    }
-                }
 
-                // Case 1: Direct function pointer inside struct
                 if (Function *F = dyn_cast<Function>(op)) {
-                    // Extract struct type name and offset from GlobalVariable type
-                    Type *ElemType = GV.getValueType(); // Should be StructType*
-                    unsigned Offset = 0; // Calculate the offset
-                    std::string StructTypeName = "unknown"; // Default if StructTypeName is not found
-                    
-                    if (StructType *ST = dyn_cast<StructType>(ElemType)) {
-                        if (ST->hasName()) {
-                            StructTypeName = ST->getName().str();  // Get the name of the struct
-                        }
-                        Offset = i * 8;  // Assuming 8-byte function pointer size
-                    }
+                    // Record function pointer assignment from struct initializer
+                    FunctionPointerSettingInfo settingInfo;
+                    settingInfo.ModName = ModName;
+                    settingInfo.VarName = GV.getName().str();  // Variable name from global
+                    settingInfo.SetterName = "global";
+                    settingInfo.StructTypeName = StructTypeName;
+                    settingInfo.FuncName = F->getName().str();
+                    settingInfo.Line = 0;  // No line info for static globals
+                    settingInfo.Offset = i;
 
-                    // Register to StaticFPMap with offset
-                    RecordFunctionPointerSetting(M->getName().str(), GV.getName().str(), StructTypeName, F->getName().str(), Line, Offset);
-                }
-
-                // Case 2: Function pointer assignment via bitcast (e.g., bitcast function pointer)
-                else if (auto *CE = dyn_cast<ConstantExpr>(op)) {
-                    if (CE->isCast()) {
-                        if (Function *F = dyn_cast<Function>(CE->getOperand(0))) {
-                            std::string StructTypeName = "unknown";
-                            Type *ElemType = GV.getValueType();
-                            if (StructType *ST = dyn_cast<StructType>(ElemType)) {
-                                if (ST->hasName())
-                                    StructTypeName = ST->getName().str();
-                            }
-
-                            // Register to StaticFPMap with offset
-                            RecordFunctionPointerSetting(M->getName().str(), GV.getName().str(), StructTypeName, F->getName().str(), Line, i * 8);
-                        }
-                    }
+                    std::string key = ModName + ":0";  // Use line 0 as placeholder
+                    FunctionPointerSettings[key].push_back(settingInfo);
                 }
             }
+        }
+
+        // Case 2: Global variable directly initialized with a function
+        if (Function *F = dyn_cast<Function>(Init)) {
+            FunctionPointerSettingInfo settingInfo;
+            settingInfo.ModName = ModName;
+            settingInfo.VarName = GV.getName().str();  // Variable name
+            settingInfo.SetterName = "global";
+            settingInfo.StructTypeName = "";  // Not part of a struct
+            settingInfo.FuncName = F->getName().str();
+            settingInfo.Line = 0;
+            settingInfo.Offset = 0;
+
+            std::string key = ModName + ":0";
+            FunctionPointerSettings[key].push_back(settingInfo);
         }
     }
 }
@@ -226,58 +210,47 @@ void CallGraphPass::CollectCallingAddressTakenFunction(Module *M) {
     std::string ModName = M->getName().str();
 
     for (Function &F : *M) {
-        if (F.isDeclaration()) continue;
-
         for (BasicBlock &BB : F) {
             for (Instruction &I : BB) {
-                if (auto *call = dyn_cast<CallBase>(&I)) {
+                if (auto *call = dyn_cast<CallInst>(&I)) {
                     Value *calledValue = call->getCalledOperand()->stripPointerCasts();
 
-                    if (isa<Function>(calledValue) || isa<ConstantExpr>(calledValue)) {
-                        continue;
-                    }
+                    // Skip direct function calls
+                    if (isa<Function>(calledValue)) continue;
 
-                    unsigned Line = 0;
-                    if (DILocation *Loc = I.getDebugLoc()) {
-                        Line = Loc->getLine();
-                    }
+                    std::string varName = "";
+                    unsigned offset = 0;
 
-                    std::string CallerFuncName = F.getName().str();
-                    std::string CalleeFuncName = "indirect";
+                    // Try to extract variable name and offset used in the indirect call
+                    if (auto *load = dyn_cast<LoadInst>(calledValue)) {
+                        Value *ptr = load->getPointerOperand();
 
-                    // Case 1: calledValue is directly a function argument
-                    for (unsigned i = 0; i < F.arg_size(); ++i) {
-                        Argument &arg = *(F.arg_begin() + i);
-                        if (&arg == calledValue) {
-                            RecordFunctionPointerUse(ModName, CallerFuncName, CalleeFuncName, Line, i);
-                            goto done;
+                        // Local variable case (alloca)
+                        if (auto *alloca = dyn_cast<AllocaInst>(ptr)) {
+                            varName = alloca->getName().str();
+                        }
+                        // Global variable case
+                        else if (auto *global = dyn_cast<GlobalVariable>(ptr)) {
+                            varName = global->getName().str();
                         }
                     }
 
-                    // Case 2: value loaded from memory that was initialized by a function argument
-                    if (auto *loadInst = dyn_cast<LoadInst>(calledValue)) {
-                        Value *loadedFrom = loadInst->getPointerOperand()->stripPointerCasts();
-
-                        for (User *U : loadedFrom->users()) {
-                            if (auto *storeInst = dyn_cast<StoreInst>(U)) {
-                                Value *storedVal = storeInst->getValueOperand()->stripPointerCasts();
-
-                                for (unsigned i = 0; i < F.arg_size(); ++i) {
-                                    Argument &arg = *(F.arg_begin() + i);
-                                    if (&arg == storedVal) {
-                                        RecordFunctionPointerUse(ModName, CallerFuncName, CalleeFuncName, Line, i);
-                                        goto done;
-                                    }
-                                }
-                            }
-                        }
+                    // For direct global loads like @sfp
+                    if (auto *global = dyn_cast<GlobalVariable>(calledValue)) {
+                        varName = global->getName().str();
                     }
 
-                    // fallback if nothing matches
-                    RecordFunctionPointerUse(ModName, CallerFuncName, CalleeFuncName, Line, 0);
+                    // Set offset if dealing with struct (e.g., .foo, .bar)
+                    if (auto *gep = dyn_cast<GetElementPtrInst>(calledValue)) {
+                        offset = 0; // You can refine the logic to get the specific offset for each field
+                    }
 
-                done:
-                    continue;
+                    unsigned line = getLineNumber(call);
+                    RecordCallGraphEdge(ModName, F.getName().str(), "indirect", line, true, varName, offset);
+
+                    errs() << "[debug] Recorded indirect call: " << F.getName()
+                           << " -> indirect (line: " << line << ")"
+                           << " via variable: " << varName << " with offset: " << offset << " in module: " << ModName << "\n";
                 }
             }
         }
@@ -439,6 +412,82 @@ void CallGraphPass::ResolveIndirectCalls() {
     }
 }
 
+void CallGraphPass::AnalyzeStaticFPCallSites() {
+    for (auto &modEntry : CallGraph) {
+        std::string ModName = modEntry.first;
+        std::vector<CallEdgeInfo> &edges = modEntry.second;
+
+        for (auto &edge : edges) {
+            if (!edge.IsIndirect || edge.CalleeFunction != "indirect")
+                continue;
+
+            const std::string &varName = edge.VarName;
+            unsigned offset = edge.Offset;
+
+            if (varName.empty())
+                continue;
+
+            // Search all entries in FunctionPointerSettings
+            for (const auto &entry : FunctionPointerSettings) {
+                for (const auto &info : entry.second) {
+                    // Ensure we are in the same module and match by VarName and Offset
+                    if (info.ModName != ModName) continue;
+                    if (info.VarName != varName) continue;
+                    if (info.Offset != offset) continue;  // Match by Offset
+
+                    // Match found, resolve the function
+                    edge.CalleeFunction = info.FuncName;
+
+                    errs() << "[debug] Resolved indirect call at "
+                           << edge.CallerFunction << ":" << edge.Line
+                           << " to " << info.FuncName
+                           << " via variable: " << varName
+                           << " with offset: " << offset << "\n";
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void CallGraphPass::AnalyzeStaticGlobalFPCalls() {
+    for (auto &modEntry : CallGraph) {
+        std::string ModName = modEntry.first;
+        std::vector<CallEdgeInfo> &edges = modEntry.second;
+
+        for (auto &edge : edges) {
+            if (!edge.IsIndirect || edge.CalleeFunction != "indirect")
+                continue;
+
+            const std::string &varName = edge.VarName;
+
+            if (varName.empty())
+                continue;
+
+            // Search all entries in FunctionPointerSettings
+            for (const auto &entry : FunctionPointerSettings) {
+                for (const auto &info : entry.second) {
+                    // Must be from same module, not a struct assignment, and matching variable name
+                    if (info.ModName != ModName)
+                        continue;
+                    if (!info.StructTypeName.empty())
+                        continue;
+                    if (info.VarName != varName)
+                        continue;
+
+                    // Match found — update callee function name
+                    edge.CalleeFunction = info.FuncName;
+
+                    errs() << "[debug] Resolved indirect call at "
+                           << edge.CallerFunction << ":" << edge.Line
+                           << " to " << info.FuncName
+                           << " via global variable: " << info.VarName << "\n";
+                    break;
+                }
+            }
+        }
+    }
+}
 
 void CallGraphPass::RecordFunctionPointerCall(
     const std::string &ModName, 
@@ -485,7 +534,9 @@ void CallGraphPass::RecordCallGraphEdge(
     const std::string &CallerFunc,
     const std::string &CalleeFunc,
     unsigned Line,
-    bool IsIndirect) {
+    bool IsIndirect,
+    const std::string &VarName,
+    unsigned Offset) {
 
     CallEdgeInfo edge;
     edge.CallerModule = ModName;
@@ -493,6 +544,8 @@ void CallGraphPass::RecordCallGraphEdge(
     edge.CalleeFunction = CalleeFunc;
     edge.Line = Line;
     edge.IsIndirect = IsIndirect;
+    edge.VarName = VarName;
+    edge.Offset = Offset;
 
     CallGraph[ModName].push_back(edge);
 
