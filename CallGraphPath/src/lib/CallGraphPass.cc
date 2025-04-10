@@ -66,7 +66,7 @@ bool CallGraphPass::IdentifyTargets(Module *M) {
 
     AnalyzeDirectCalls(M);
     AnalyzeIndirectCalls();
-    
+
     PrintCallGraph(CallGraph);
 
     return true;
@@ -351,21 +351,25 @@ void CallGraphPass::AnalyzeDirectCalls(Module *M) {
             for (Instruction &I : BB) {
                 // Look for direct call instructions
                 if (auto *call = dyn_cast<CallBase>(&I)) {
+                    // Resolve the callee function
                     Function *calleeFunc = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
-                    if (!calleeFunc || calleeFunc->isDeclaration()) continue;
+
+                    // Skip if we can't resolve the callee at all (e.g., function pointer)
+                    if (!calleeFunc) continue;
 
                     std::string CalleeFunc = calleeFunc->getName().str();
                     unsigned Line = 0;
                     if (DILocation *Loc = I.getDebugLoc())
                         Line = Loc->getLine();
 
-                    // Use common recording function
+                    // Record all resolved direct calls, including external functions like printf
                     RecordCallGraphEdge(ModName, CallerFunc, CalleeFunc, Line, false);
                 }
             }
         }
     }
 }
+
 
 void CallGraphPass::AnalyzeIndirectCalls() {
     for (const auto &entry : FunctionPointerUses) {
