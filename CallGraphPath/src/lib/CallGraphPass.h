@@ -59,6 +59,31 @@ struct FunctionPointerCallInfo {
 // Map to store FunctionPointerCallInfo, with key as "ModuleName:LineNumber"
 using FunctionPointerCallMap = std::map<std::string, std::vector<FunctionPointerCallInfo>>;
 
+// Structure for function pointer usage (from the callee site, e.g., bar)
+struct FunctionPointerUseInfo {
+    std::string ModName;
+    std::string CallerFuncName; // e.g., bar
+    std::string CalleeFuncName; // typically "indirect"
+    unsigned Line;
+    unsigned ArgIndex;
+};
+
+using FunctionPointerUseMap = std::map<std::string, std::vector<FunctionPointerUseInfo>>;
+
+
+// Call-edge
+struct CallEdgeInfo {
+    std::string CallerModule;
+    std::string CallerFunction;
+    std::string CalleeFunction;
+    unsigned Line;
+    bool IsIndirect;
+};
+
+// Callgraph
+using ModuleCallGraph = std::map<std::string, std::vector<CallEdgeInfo>>;
+
+
 class CallGraphPass {
     private:
         ModuleFunctionMap ModuleFunctionMap;
@@ -66,13 +91,16 @@ class CallGraphPass {
         // Record the function pointer setting along with the offset in the struct
         std::set<std::tuple<std::string, std::string, unsigned, unsigned>> ProcessedSettings;
 
-        FunctionPointerCallMap FunctionPointerCallMap;
+        FunctionPointerCallMap FunctionPointerCalls;
+        FunctionPointerUseMap FunctionPointerUses;
+        ModuleCallGraph CallGraph;
 
         void CollectFunctionProtoTypes(Module *M);
         void CollectStaticFunctionPointerAssignments(Module *M);
         void CollectCallingAddressTakenFunction(Module *M);
         void CollectDynamicFunctionPointerAssignments(Module *M);
         void CollectFunctionPointerArgumentPassing(Module *M);
+        void AnalyzeDirectCalls(Module *M);
 
         void RecordFunctionPointerSetting(
             const std::string &ModName,
@@ -88,6 +116,20 @@ class CallGraphPass {
             const std::string &CalleeFuncName, 
             unsigned Line,
             unsigned ArgIndex);
+
+        void RecordFunctionPointerUse(
+            const std::string &ModName,
+            const std::string &CallerFuncName,
+            const std::string &CalleeFuncName,
+            unsigned Line,
+            unsigned ArgIndex);
+
+        void RecordCallGraphEdge(
+            const std::string &ModName,
+            const std::string &CallerFunc,
+            const std::string &CalleeFunc,
+            unsigned Line,
+            bool IsIndirect);
 
     protected:
         const char * ID;

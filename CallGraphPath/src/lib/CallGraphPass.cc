@@ -54,7 +54,9 @@ bool CallGraphPass::CollectInformation(Module *M) {
     
     PrintModuleFunctionMap(ModuleFunctionMap, M->getName().str());
     PrintFunctionPointerSettings(FunctionPointerSettings);
-    PrintFunctionPointerCallMap(FunctionPointerCallMap);
+    PrintFunctionPointerCallMap(FunctionPointerCalls);
+    PrintFunctionPointerUseMap(FunctionPointerUses);
+
     return true;
 }
 
@@ -62,6 +64,10 @@ bool CallGraphPass::IdentifyTargets(Module *M) {
     std::string ModName = M->getName().str();
     errs() << "Identifying targets in module: " << ModName << "\n";
 
+    AnalyzeDirectCalls(M);
+
+    PrintCallGraph(CallGraph);
+    
     return true;
 }
 
@@ -225,12 +231,10 @@ void CallGraphPass::CollectCallingAddressTakenFunction(Module *M) {
                 if (auto *call = dyn_cast<CallBase>(&I)) {
                     Value *calledValue = call->getCalledOperand()->stripPointerCasts();
 
-                    // Skip direct calls
                     if (isa<Function>(calledValue) || isa<ConstantExpr>(calledValue)) {
                         continue;
                     }
 
-                    // Get line number
                     unsigned Line = 0;
                     if (DILocation *Loc = I.getDebugLoc()) {
                         Line = Loc->getLine();
@@ -239,17 +243,16 @@ void CallGraphPass::CollectCallingAddressTakenFunction(Module *M) {
                     std::string CallerFuncName = F.getName().str();
                     std::string CalleeFuncName = "indirect";
 
-                    // Case 1: Called value is directly an argument
+                    // Case 1: calledValue is directly a function argument
                     for (unsigned i = 0; i < F.arg_size(); ++i) {
                         Argument &arg = *(F.arg_begin() + i);
                         if (&arg == calledValue) {
-                            // Directly using argument as function pointer
-                            RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, i);
-                            goto done; // skip to next instruction
+                            RecordFunctionPointerUse(ModName, CallerFuncName, CalleeFuncName, Line, i);
+                            goto done;
                         }
                     }
 
-                    // Case 2: Called value is loaded from memory (possibly from a function pointer argument)
+                    // Case 2: value loaded from memory that was initialized by a function argument
                     if (auto *loadInst = dyn_cast<LoadInst>(calledValue)) {
                         Value *loadedFrom = loadInst->getPointerOperand()->stripPointerCasts();
 
@@ -260,8 +263,7 @@ void CallGraphPass::CollectCallingAddressTakenFunction(Module *M) {
                                 for (unsigned i = 0; i < F.arg_size(); ++i) {
                                     Argument &arg = *(F.arg_begin() + i);
                                     if (&arg == storedVal) {
-                                        // Indirect call via function pointer argument stored in local variable
-                                        RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, i);
+                                        RecordFunctionPointerUse(ModName, CallerFuncName, CalleeFuncName, Line, i);
                                         goto done;
                                     }
                                 }
@@ -269,8 +271,8 @@ void CallGraphPass::CollectCallingAddressTakenFunction(Module *M) {
                         }
                     }
 
-                    // Optional: fallback for unknown indirect call
-                    RecordFunctionPointerCall(ModName, CallerFuncName, CalleeFuncName, Line, 0);
+                    // fallback if nothing matches
+                    RecordFunctionPointerUse(ModName, CallerFuncName, CalleeFuncName, Line, 0);
 
                 done:
                     continue;
@@ -336,6 +338,34 @@ void CallGraphPass::CollectFunctionPointerArgumentPassing(Module *M) {
     }
 }
 
+void CallGraphPass::AnalyzeDirectCalls(Module *M) {
+    std::string ModName = M->getName().str();
+
+    for (Function &F : *M) {
+        if (F.isDeclaration()) continue;
+
+        std::string CallerFunc = F.getName().str();
+
+        for (BasicBlock &BB : F) {
+            for (Instruction &I : BB) {
+                // Look for direct call instructions
+                if (auto *call = dyn_cast<CallBase>(&I)) {
+                    Function *calleeFunc = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+                    if (!calleeFunc || calleeFunc->isDeclaration()) continue;
+
+                    std::string CalleeFunc = calleeFunc->getName().str();
+                    unsigned Line = 0;
+                    if (DILocation *Loc = I.getDebugLoc())
+                        Line = Loc->getLine();
+
+                    // Use common recording function
+                    RecordCallGraphEdge(ModName, CallerFunc, CalleeFunc, Line, false);
+                }
+            }
+        }
+    }
+}
+
 void CallGraphPass::RecordFunctionPointerCall(
     const std::string &ModName, 
     const std::string &CallerFuncName, 
@@ -349,7 +379,7 @@ void CallGraphPass::RecordFunctionPointerCall(
     FunctionPointerCallInfo callInfo{ModName, CallerFuncName, CalleeFuncName, Line, ArgIndex};
 
     // Insert the call information into the map with the updated key
-    FunctionPointerCallMap[key].push_back(callInfo);
+    FunctionPointerCalls[key].push_back(callInfo);
 
     // Optionally log the function pointer call information
     errs() << "[debug] Recorded function pointer call: " 
@@ -358,4 +388,42 @@ void CallGraphPass::RecordFunctionPointerCall(
            << ", Callee: " << CalleeFuncName 
            << " at line: " << Line
            << " with argument index: " << ArgIndex << "\n";
+}
+
+void CallGraphPass::RecordFunctionPointerUse(
+    const std::string &ModName,
+    const std::string &CallerFuncName,
+    const std::string &CalleeFuncName,
+    unsigned Line,
+    unsigned ArgIndex) {
+
+    std::string key = ModName + ":" + std::to_string(Line) + ":" + std::to_string(ArgIndex);
+    FunctionPointerUseInfo info{ModName, CallerFuncName, CalleeFuncName, Line, ArgIndex};
+    FunctionPointerUses[key].push_back(info);
+
+    errs() << "[debug] Recorded function pointer use: Module: " << ModName
+           << ", Caller: " << CallerFuncName << ", Callee: " << CalleeFuncName
+           << " at line: " << Line << " with argument index: " << ArgIndex << "\n";
+}
+
+void CallGraphPass::RecordCallGraphEdge(
+    const std::string &ModName,
+    const std::string &CallerFunc,
+    const std::string &CalleeFunc,
+    unsigned Line,
+    bool IsIndirect) {
+
+    CallEdgeInfo edge;
+    edge.CallerModule = ModName;
+    edge.CallerFunction = CallerFunc;
+    edge.CalleeFunction = CalleeFunc;
+    edge.Line = Line;
+    edge.IsIndirect = IsIndirect;
+
+    CallGraph[ModName].push_back(edge);
+
+    // Debug print
+    errs() << "[debug] Recorded " << (IsIndirect ? "indirect" : "direct") << " call: "
+           << CallerFunc << " -> " << CalleeFunc
+           << " (line: " << Line << ") in module: " << ModName << "\n";
 }

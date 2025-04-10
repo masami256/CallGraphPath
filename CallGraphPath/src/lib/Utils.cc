@@ -62,3 +62,37 @@ void PrintFunctionPointerCallMap(const FunctionPointerCallMap &CallMap) {
 
     errs() << "==== Dump FunctionPointerCallMap data end ====\n";
 }
+
+void PrintFunctionPointerUseMap(const FunctionPointerUseMap &UseMap) {
+    errs() << "==== Dump FunctionPointerUseMap data ====\n";
+    for (const auto &entry : UseMap) {
+        errs() << "[debug] Function pointer uses for " << entry.first << ":\n";
+        for (const auto &info : entry.second) {
+            errs() << "  Module: " << info.ModName << "\n"
+                   << "  Caller function: " << info.CallerFuncName << "\n"
+                   << "  Callee function: " << info.CalleeFuncName << "\n"
+                   << "  Line: " << info.Line << "\n"
+                   << "  Argument index: " << info.ArgIndex << "\n";
+        }
+    }
+    errs() << "==== Dump FunctionPointerUseMap data end ====\n";
+}
+
+void PrintCallGraph(const ModuleCallGraph &CallGraph) {
+    errs() << "==== Dump CallGraph data ====\n";
+
+    for (const auto &entry : CallGraph) {
+        const std::string &ModName = entry.first;
+        const std::vector<CallEdgeInfo> &edges = entry.second;
+
+        errs() << "[debug] Call edges for module: " << ModName << "\n";
+        for (const auto &edge : edges) {
+            errs() << "  Caller function: " << edge.CallerFunction << "\n"
+                   << "  Callee function: " << edge.CalleeFunction << "\n"
+                   << "  Line: " << edge.Line << "\n"
+                   << "  Type: " << (edge.IsIndirect ? "indirect" : "direct") << "\n";
+        }
+    }
+
+    errs() << "==== Dump CallGraph data end ====\n";
+}
