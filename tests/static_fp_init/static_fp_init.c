@@ -31,8 +31,8 @@ static void (*sfp)(void) = mybaz;
 
 __attribute__((noinline))  static void test_func(struct inode *inode) {
     printf("test_func\n");
-    inode->i_op->foo();
-    inode->i_op->bar();
+    inode->i_op->foo(); // call myfoo
+    inode->i_op->bar(); // call mybar
 }
 
 int main(int argc, char **argv) {
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
     };
 
     test_func(&i);
-    sfp();
-    fp();
+    sfp(); // call mybaz()
+    fp(); // call mybar()
     return 0;
 }
