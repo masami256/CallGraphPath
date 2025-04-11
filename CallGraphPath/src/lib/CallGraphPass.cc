@@ -31,13 +31,9 @@ void CallGraphPass::run(ModuleList &modules) {
             std::cerr << "Error collecting information for module: " << ModuleName << std::endl;
             continue;
         }
-
-        if (!IdentifyTargets(M)) {
-            std::cerr << "Error identifying targets for module: " << ModuleName << std::endl;
-            continue;
-        }
-        // Print the collected information
 	}
+
+    IdentifyTargets();
 
     std::cout << "Pass completed: " << ID << std::endl;
 }
@@ -61,10 +57,7 @@ bool CallGraphPass::CollectInformation(Module *M) {
     return true;
 }
 
-bool CallGraphPass::IdentifyTargets(Module *M) {
-    std::string ModName = M->getName().str();
-    errs() << "Identifying targets in module: " << ModName << "\n";
-
+bool CallGraphPass::IdentifyTargets() {
     AnalyzeIndirectCalls();
     ResolveIndirectCalls();
     AnalyzeStaticFPCallSites();

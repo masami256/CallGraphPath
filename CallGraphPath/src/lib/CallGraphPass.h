@@ -158,5 +158,5 @@ class CallGraphPass {
         
         void run(ModuleList &modules);
         bool CollectInformation(Module *M);
-        bool IdentifyTargets(llvm::Module *M);
+        bool IdentifyTargets(void);
 };
